@@ -1,0 +1,68 @@
+{
+  "name": "sql-visual-debugger",
+  "displayName": "SQL Visual Debugger",
+  "description": "Step through SELECT queries against your live MySQL database and see intermediate results at every clause.",
+  "version": "0.1.0",
+  "publisher": "sql-visual-debugger",
+  "engines": {
+    "vscode": "^1.80.0"
+  },
+  "activationEvents": [
+    "onLanguage:sql"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "sqlDebugger.debugQuery",
+        "title": "SQL Debugger: Debug Query"
+      },
+      {
+        "command": "sqlDebugger.configureConnection",
+        "title": "SQL Debugger: Configure Connection"
+      },
+      {
+        "command": "sqlDebugger.changeConnection",
+        "title": "SQL Debugger: Switch Database"
+      }
+    ],
+    "menus": {
+      "editor/context": [
+        {
+          "command": "sqlDebugger.debugQuery",
+          "when": "editorLangId == sql",
+          "group": "navigation"
+        }
+      ],
+      "commandPalette": [
+        {
+          "command": "sqlDebugger.debugQuery"
+        },
+        {
+          "command": "sqlDebugger.configureConnection"
+        },
+        {
+          "command": "sqlDebugger.changeConnection"
+        }
+      ]
+    },
+    "keybindings": [
+      {
+        "command": "sqlDebugger.debugQuery",
+        "key": "f5",
+        "when": "editorLangId == sql && editorFocus"
+      }
+    ]
+  },
+  "scripts": {
+    "compile": "tsc -p ./"
+  },
+  "dependencies": {
+    "mysql2": "^3.9.7"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.15",
+    "@types/vscode": "^1.80.0",
+    "typescript": "^5.5.4"
+  }
+}
