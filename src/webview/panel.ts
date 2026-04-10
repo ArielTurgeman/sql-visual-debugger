@@ -563,8 +563,10 @@ function renderApp(input: { sql: string; source: string; connectionLabel: string
         const container = document.getElementById('groupBreakdownContainer');
         if (!container) return;
 
-        document.querySelectorAll('.groupRow').forEach((tr) => {
-          tr.addEventListener('click', () => {
+        document.querySelectorAll('.groupByClickableCell').forEach((cell) => {
+          cell.addEventListener('click', () => {
+            const tr = cell.closest('.groupRow');
+            if (!tr) return;
             // Deselect all, select clicked row.
             document.querySelectorAll('.groupRow').forEach(r => r.classList.remove('activeGroupRow'));
             tr.classList.add('activeGroupRow');
@@ -977,7 +979,7 @@ function renderApp(input: { sql: string; source: string; connectionLabel: string
                       : '';
             return isCase
               ? \`<td class="\${cls} caseCell \${activeCaseCell && activeCaseCell.column === col && activeCaseCell.rowIndex === rowIdx ? 'activeCaseCell' : ''}" data-case-column="\${escapeAttr(col)}" data-case-row="\${rowIdx}">\${escapeHtml(row[col])}</td>\`
-              : \`<td class="\${cls}">\${escapeHtml(row[col])}</td>\`;
+              : \`<td class="\${cls}\${isGroupByStep && isGroupBy ? ' groupByClickableCell' : ''}">\${escapeHtml(row[col])}</td>\`;
           }).join('');
           const rowAttrs = isGroupByStep
             ? \`class="groupRow" data-rowindex="\${rowIdx}"\`
@@ -1667,9 +1669,10 @@ function styles(): string {
     }
     .error { color: #ffb8b8; }
     /* GROUP BY clickable rows */
-    .groupRow { cursor: pointer; transition: background 0.08s; }
-    .groupRow:hover { background: rgba(80,200,180,.07); }
+    .groupRow { transition: background 0.08s; }
     .groupRow.activeGroupRow { background: rgba(80,200,180,.15); outline: 1px solid rgba(80,200,180,.35); outline-offset: -1px; }
+    .groupByClickableCell { cursor: pointer; }
+    .groupByClickableCell:hover { background: rgba(80,200,180,.13); }
     /* Hint above the grouped table — mirrors .joinHint so it's equally prominent */
     .groupClickHint {
       font-size: 10px;
