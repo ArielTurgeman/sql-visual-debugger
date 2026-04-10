@@ -142,6 +142,7 @@ function renderApp(input: { sql: string; source: string; connectionLabel: string
 
       let currentStepIndex = 0;
       let activeWindowColumn = null;
+      let distinctPanelOpen = false;
       const app = document.getElementById('app');
 
       function getBlockGroups() {
@@ -222,6 +223,9 @@ function renderApp(input: { sql: string; source: string; connectionLabel: string
         if (step.name !== 'SELECT') {
           activeWindowColumn = null;
         }
+        if (step.name !== 'SELECT' || !step.distinctMeta) {
+          distinctPanelOpen = false;
+        }
         app.innerHTML = \`
           <div class="topbar card">
             <div class="topbarInfo">
@@ -256,6 +260,7 @@ function renderApp(input: { sql: string; source: string; connectionLabel: string
           </div>
 
           \${step.joinMeta ? renderJoinPanel(step) : ""}
+          \${renderDistinctPanel(step)}
           \${renderIntermediate(step)}
         \`;
 
@@ -275,6 +280,7 @@ function renderApp(input: { sql: string; source: string; connectionLabel: string
         bindJoinClicks(step);
         bindGroupBreakdown(step);
         bindWindowDetails(step);
+        bindDistinctPanel(step);
 
         // Notify the extension host which step is now active so it can apply
         // the corresponding editor decoration.  Sent after every render(),
@@ -770,6 +776,73 @@ function renderApp(input: { sql: string; source: string; connectionLabel: string
               <div class="whereScalarLabel">Subquery value</div>
               <div class="whereScalarValue">\${escapeHtml(meta.value === null ? 'NULL' : String(meta.value))}</div>
               <div class="whereScalarMeta">\${escapeHtml(meta.columnLabel)}</div>
+            </div>
+          </div>\`;
+      }
+
+      function renderDistinctPanel(step) {
+        if (step.name !== 'SELECT' || !step.distinctMeta) {
+          return '';
+        }
+
+        return \`
+          <div class="distinctPanelSlot">
+            <button type="button" class="distinctBadge \${distinctPanelOpen ? 'active' : ''}" id="distinctBadgeToggle">DISTINCT</button>
+            \${distinctPanelOpen ? renderDistinctDetail(step.distinctMeta) : ''}
+          </div>\`;
+      }
+
+      function bindDistinctPanel(step) {
+        if (step.name !== 'SELECT' || !step.distinctMeta) {
+          return;
+        }
+
+        document.getElementById('distinctBadgeToggle')?.addEventListener('click', () => {
+          distinctPanelOpen = !distinctPanelOpen;
+          render();
+        });
+      }
+
+      function renderDistinctDetail(meta) {
+        const cols = meta.columns || [];
+        const rows = meta.rows || [];
+        const groupMap = new Map();
+
+        rows.forEach((row) => {
+          const fingerprint = cols.map(c => String(row[c] ?? '')).join('\x00');
+          const existing = groupMap.get(fingerprint);
+          if (existing) {
+            existing.push(row);
+          } else {
+            groupMap.set(fingerprint, [row]);
+          }
+        });
+
+        const duplicateGroups = Array.from(groupMap.values()).filter(groupRows => groupRows.length > 1);
+        const headerHtml = cols.map(c => \`<th>\${escapeHtml(c)}</th>\`).join('');
+        const bodyHtml = duplicateGroups.length > 0
+          ? duplicateGroups.map((groupRows) =>
+          groupRows.map((row, idx) => {
+            const removed = idx > 0;
+            const cells = cols.map(c => {
+              const style = removed
+                ? 'background:rgba(255,80,80,.10);text-decoration:line-through;'
+                : '';
+              return \`<td style="\${style}">\${escapeHtml(row[c])}</td>\`;
+            }).join('');
+            return \`<tr\${removed ? ' style="opacity:.62;"' : ''}>\${cells}</tr>\`;
+          }).join('')
+        ).join('')
+          : \`<tr><td colspan="\${Math.max(cols.length, 1)}" class="noMatchCell">No duplicate selected rows were collapsed</td></tr>\`;
+
+        return \`
+          <div class="distinctDetailBlock">
+            <div class="distinctDetailSentence">DISTINCT kept one copy of each unique selected row and removed the duplicates.</div>
+            <div class="tableWrap filteredWrap">
+              <table>
+                <thead><tr>\${headerHtml}</tr></thead>
+                <tbody>\${bodyHtml}</tbody>
+              </table>
             </div>
           </div>\`;
       }
@@ -1389,6 +1462,41 @@ function styles(): string {
       font-size: 10px;
       color: var(--muted);
       margin-bottom: 6px;
+    }
+    .distinctPanelSlot {
+      display: flex;
+      flex-direction: column;
+      align-items: flex-start;
+      gap: 8px;
+      margin: -2px 0 10px;
+    }
+    .distinctBadge {
+      padding: 3px 10px;
+      border-radius: 999px;
+      border: 1px solid rgba(67,200,130,.35);
+      background: rgba(67,200,130,.12);
+      color: #bff1d4;
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+    }
+    .distinctBadge:hover {
+      background: rgba(67,200,130,.18);
+      border-color: rgba(67,200,130,.5);
+    }
+    .distinctBadge.active {
+      background: rgba(67,200,130,.22);
+      border-color: rgba(67,200,130,.58);
+    }
+    .distinctDetailBlock {
+      width: 100%;
+    }
+    .distinctDetailSentence {
+      font-size: 11px;
+      color: var(--text);
+      margin-bottom: 8px;
+      line-height: 1.45;
     }
     .windowPartitionBreak td {
       border-top: 3px solid rgba(122,162,255,.45);

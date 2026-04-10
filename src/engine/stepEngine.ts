@@ -47,6 +47,7 @@ export type DebugStep = {
   windowColumns?: WindowColumnMeta[];
   preSelectRows?: Record<string, unknown>[];
   preSelectColumns?: string[];
+  distinctMeta?: DistinctMeta;
 };
 
 export type WhereInSubqueryMeta = {
@@ -74,6 +75,11 @@ export type WindowColumnMeta = {
   howComputed: string[];
   previewColumns: string[];
   previewRows: Record<string, unknown>[];
+};
+
+export type DistinctMeta = {
+  columns: string[];
+  rows: Record<string, unknown>[];
 };
 
 export type JoinMeta = {
@@ -419,15 +425,34 @@ async function executeSingleQueryBlockSteps(block: QueryBlock, runner: MysqlRunn
   }
 
   const finalBaseBefore = currentRows.length;
+  const usesDistinct = isSelectDistinct(parsed.selectClause);
   // For SELECT *, use canonical schema so qualified duplicate columns are preserved.
   // For specific column projections or queries with aggregation, use the real SQL.
   const useCanonicalTail = isSelectStar && !parsed.groupByClause && !parsed.havingClause;
   let selectedRows: Record<string, unknown>[];
+  let distinctMeta: DistinctMeta | undefined;
   if (useCanonicalTail) {
     const tail = parsed.whereClause ?? '';
-    selectedRows = await runCustomSelect(runner, buildCanonicalQuery(canonicalSchema, currentFromSql, tail));
+    selectedRows = await runCustomSelect(runner, buildCanonicalQuery(canonicalSchema, currentFromSql, tail, usesDistinct));
+    if (usesDistinct) {
+      const preDistinctRows = await runCustomSelect(runner, buildCanonicalQuery(canonicalSchema, currentFromSql, tail));
+      distinctMeta = {
+        columns: getColumns(preDistinctRows),
+        rows: preDistinctRows.slice(0, MAX_DISPLAY_ROWS),
+      };
+    }
   } else {
     selectedRows = await runCustomSelect(runner, buildFinalQuery(parsed, { upTo: 'SELECT' }));
+    if (usesDistinct) {
+      const preDistinctRows = await runCustomSelect(
+        runner,
+        buildFinalQuery({ ...parsed, selectClause: removeDistinctFromSelectClause(parsed.selectClause) }, { upTo: 'SELECT' }),
+      );
+      distinctMeta = {
+        columns: getColumns(preDistinctRows),
+        rows: preDistinctRows.slice(0, MAX_DISPLAY_ROWS),
+      };
+    }
   }
   const preSelectRows = currentRows.slice(0, MAX_DISPLAY_ROWS);
   const preSelectColumns = getColumns(currentRows);
@@ -448,6 +473,7 @@ async function executeSingleQueryBlockSteps(block: QueryBlock, runner: MysqlRunn
     windowColumns,
     preSelectRows,
     preSelectColumns,
+    distinctMeta,
   });
   currentRows = selectedRows;
 
@@ -1333,14 +1359,15 @@ function buildCanonicalQuery(
   canonicalSchema: ColumnDef[],
   fromAndJoinsSql: string,
   tailClauses: string = '',
+  distinct = false,
 ): string {
   if (canonicalSchema.length === 0) {
-    return `SELECT * ${fromAndJoinsSql}${tailClauses ? ' ' + tailClauses : ''}`;
+    return `SELECT${distinct ? ' DISTINCT' : ''} * ${fromAndJoinsSql}${tailClauses ? ' ' + tailClauses : ''}`;
   }
   const selectList = canonicalSchema
     .map(col => (col.sqlAlias ? `${col.sqlExpr} AS ${col.sqlAlias}` : col.sqlExpr))
     .join(', ');
-  return `SELECT ${selectList} ${fromAndJoinsSql}${tailClauses ? ' ' + tailClauses : ''}`;
+  return `SELECT${distinct ? ' DISTINCT' : ''} ${selectList} ${fromAndJoinsSql}${tailClauses ? ' ' + tailClauses : ''}`;
 }
 
 function buildFinalQuery(parsed: ParsedQuery, opts: { upTo: 'GROUP BY' | 'HAVING' | 'SELECT' | 'ORDER BY' | 'LIMIT' }): string {
@@ -1426,6 +1453,14 @@ function parseSelectQuery(sql: string): ParsedQuery {
     orderByClause: extractClause(cleaned, ' ORDER BY ', [' LIMIT ']),
     limitClause: extractClause(cleaned, ' LIMIT ', []),
   };
+}
+
+function isSelectDistinct(selectClause: string): boolean {
+  return /^SELECT\s+DISTINCT\b/i.test(selectClause.trim());
+}
+
+function removeDistinctFromSelectClause(selectClause: string): string {
+  return selectClause.replace(/^(\s*SELECT)\s+DISTINCT\b\s*/i, '$1 ');
 }
 
 function parseFromAndJoins(fromAndJoins: string): { baseClause: string; joins: ParsedJoin[] } {
