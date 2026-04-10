@@ -45,6 +45,7 @@ export type DebugStep = {
   sourceRows?: number;
   sourceLabel?: string;
   windowColumns?: WindowColumnMeta[];
+  caseColumns?: CaseColumnMeta[];
   preSelectRows?: Record<string, unknown>[];
   preSelectColumns?: string[];
   distinctMeta?: DistinctMeta;
@@ -75,6 +76,19 @@ export type WindowColumnMeta = {
   howComputed: string[];
   previewColumns: string[];
   previewRows: Record<string, unknown>[];
+};
+
+export type CaseColumnMeta = {
+  outputColumn: string;
+  expression: string;
+  inputColumns: string[];
+  rowExplanations: CaseRowExplanation[];
+};
+
+export type CaseRowExplanation = {
+  matchedRule: string;
+  returnedValue: unknown;
+  inputValues: Array<{ column: string; value: unknown }>;
 };
 
 export type DistinctMeta = {
@@ -457,6 +471,17 @@ async function executeSingleQueryBlockSteps(block: QueryBlock, runner: MysqlRunn
   const preSelectRows = currentRows.slice(0, MAX_DISPLAY_ROWS);
   const preSelectColumns = getColumns(currentRows);
   const windowColumns = detectWindowColumns(parsed.selectClause, getColumns(selectedRows), currentRows, selectedRows);
+  const caseColumns = await detectCaseColumns(
+    parsed.selectClause,
+    getColumns(selectedRows),
+    currentRows,
+    runner,
+    parsed,
+    useCanonicalTail,
+    canonicalSchema,
+    currentFromSql,
+    usesDistinct,
+  );
   steps.push({
     name: 'SELECT',
     title: 'SELECT',
@@ -471,6 +496,7 @@ async function executeSingleQueryBlockSteps(block: QueryBlock, runner: MysqlRunn
     columns: getColumns(selectedRows),
     schemaContext,
     windowColumns,
+    caseColumns,
     preSelectRows,
     preSelectColumns,
     distinctMeta,
@@ -975,6 +1001,53 @@ function detectWindowColumns(
   return windows;
 }
 
+async function detectCaseColumns(
+  selectClause: string,
+  resultColumns: string[],
+  inputRows: Record<string, unknown>[],
+  runner: MysqlRunner,
+  parsed: ParsedQuery,
+  useCanonicalTail: boolean,
+  canonicalSchema: ColumnDef[],
+  currentFromSql: string,
+  usesDistinct: boolean,
+): Promise<CaseColumnMeta[]> {
+  const items = splitTopLevelSelectItems(selectClause.replace(/^SELECT\s+/i, ''));
+  const inputColumns = getColumns(inputRows);
+  const parsedCases = items
+    .map(item => parseCaseExpression(item, resultColumns, inputColumns))
+    .filter((meta): meta is ParsedCaseExpression => meta !== null);
+
+  if (parsedCases.length === 0) {
+    return [];
+  }
+
+  const helperSql = buildCaseDebugQuery(
+    selectClause,
+    parsedCases,
+    parsed,
+    useCanonicalTail,
+    canonicalSchema,
+    currentFromSql,
+    usesDistinct,
+  );
+  const helperRows = (await runCustomSelect(runner, helperSql)).slice(0, MAX_DISPLAY_ROWS);
+
+  return parsedCases.map((meta, caseIndex) => ({
+    outputColumn: meta.outputColumn,
+    expression: meta.expression,
+    inputColumns: meta.inputRefs.map(ref => ref.label),
+    rowExplanations: helperRows.map((row) => ({
+      matchedRule: String(row[`__sql_debug_case_${caseIndex}_branch`] ?? 'No matching branch'),
+      returnedValue: row[meta.outputColumn],
+      inputValues: meta.inputRefs.map((ref, inputIndex) => ({
+        column: ref.label,
+        value: row[`__sql_debug_case_${caseIndex}_input_${inputIndex}`],
+      })),
+    })),
+  }));
+}
+
 function splitTopLevelSelectItems(selectBody: string): string[] {
   const items: string[] = [];
   let depth = 0;
@@ -1080,7 +1153,53 @@ function parseWindowOverClause(overClause: string): {
   return { partitionBy, orderBy, orderByTerms };
 }
 
+function buildCaseDebugQuery(
+  selectClause: string,
+  cases: ParsedCaseExpression[],
+  parsed: ParsedQuery,
+  useCanonicalTail: boolean,
+  canonicalSchema: ColumnDef[],
+  currentFromSql: string,
+  usesDistinct: boolean,
+): string {
+  if (useCanonicalTail) {
+    const helperColumns = cases.flatMap((meta, caseIndex) => buildCaseHelperSelectParts(meta, caseIndex)).join(', ');
+    const selectList = canonicalSchema
+      .map(col => (col.sqlAlias ? `${col.sqlExpr} AS ${col.sqlAlias}` : col.sqlExpr))
+      .concat(helperColumns ? [helperColumns] : [])
+      .join(', ');
+    const tail = parsed.whereClause ?? '';
+    return `SELECT${usesDistinct ? ' DISTINCT' : ''} ${selectList} ${currentFromSql}${tail ? ` ${tail}` : ''}`;
+  }
+
+  const selectBody = selectClause.replace(/^SELECT\s+/i, '').trim();
+  const helperColumns = cases.flatMap((meta, caseIndex) => buildCaseHelperSelectParts(meta, caseIndex));
+  const helperSelectClause = `SELECT ${[selectBody, ...helperColumns].join(', ')}`;
+  return buildFinalQuery({ ...parsed, selectClause: helperSelectClause }, { upTo: 'SELECT' });
+}
+
+function buildCaseHelperSelectParts(meta: ParsedCaseExpression, caseIndex: number): string[] {
+  const branchClauses = meta.branches.map(branch =>
+    `WHEN ${branch.condition} THEN ${quoteSqlString(branch.label)}`
+  );
+  const branchExpr = `CASE ${branchClauses.join(' ')} ELSE ${quoteSqlString(meta.elseLabel)} END AS \`__sql_debug_case_${caseIndex}_branch\``;
+  const inputExprs = meta.inputRefs.map((ref, inputIndex) =>
+    `${ref.expr} AS \`__sql_debug_case_${caseIndex}_input_${inputIndex}\``
+  );
+  return [branchExpr, ...inputExprs];
+}
+
 function resolveWindowOutputColumn(alias: string | undefined, expr: string, resultColumns: string[]): string {
+  if (alias) {
+    const matched = resultColumns.find(col => bareIdentifier(col).toLowerCase() === alias.toLowerCase());
+    if (matched) return matched;
+  }
+
+  const normalizedExpr = normalizeSqlFragment(expr);
+  return resultColumns.find(col => normalizeSqlFragment(col) === normalizedExpr) ?? alias ?? expr;
+}
+
+function resolveCaseOutputColumn(alias: string | undefined, expr: string, resultColumns: string[]): string {
   if (alias) {
     const matched = resultColumns.find(col => bareIdentifier(col).toLowerCase() === alias.toLowerCase());
     if (matched) return matched;
@@ -1216,6 +1335,75 @@ function dedupeStrings(values: string[]): string[] {
     result.push(value);
   }
   return result;
+}
+
+function extractCaseInputRefs(
+  conditions: string[],
+  availableInputColumns: string[],
+): Array<{ expr: string; label: string }> {
+  const refs: Array<{ expr: string; label: string }> = [];
+  const seen = new Set<string>();
+  const availableBare = new Set(availableInputColumns.map(col => bareIdentifier(col).toLowerCase()));
+  const keywordSet = new Set([
+    'AND', 'OR', 'NOT', 'IN', 'IS', 'NULL', 'LIKE', 'BETWEEN', 'WHEN', 'THEN', 'ELSE', 'END',
+    'CASE', 'TRUE', 'FALSE', 'AS', 'ON', 'OVER', 'PARTITION', 'BY', 'ORDER', 'ASC', 'DESC',
+  ]);
+
+  for (const condition of conditions) {
+    const tokenRx = /(`[^`]+`(?:\.`[^`]+`)?|[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)?)/g;
+    let match: RegExpExecArray | null;
+    while ((match = tokenRx.exec(condition)) !== null) {
+      const raw = match[1];
+      const token = stripTicks(raw);
+      const bare = bareIdentifier(token);
+      const key = token.toLowerCase();
+      const nextChar = condition.slice(match.index + raw.length).trimStart()[0];
+      if (keywordSet.has(bare.toUpperCase())) continue;
+      if (nextChar === '(') continue;
+      if (!token.includes('.') && !availableBare.has(bare.toLowerCase())) continue;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      refs.push({ expr: raw, label: bare });
+    }
+  }
+
+  return refs;
+}
+
+function findNextTopLevelKeyword(text: string, start: number, keywords: string[]): number {
+  let depth = 0;
+  let quote: string | null = null;
+
+  for (let i = start; i < text.length; i++) {
+    const ch = text[i];
+    if (quote) {
+      if (ch === quote && text[i - 1] !== '\\') {
+        quote = null;
+      }
+      continue;
+    }
+    if (ch === '\'' || ch === '"' || ch === '`') {
+      quote = ch;
+      continue;
+    }
+    if (ch === '(') {
+      depth += 1;
+      continue;
+    }
+    if (ch === ')') {
+      depth = Math.max(0, depth - 1);
+      continue;
+    }
+    if (depth === 0 && keywords.some(keyword => matchesWordAt(text, i, keyword))) {
+      return i;
+    }
+  }
+
+  return -1;
+}
+
+function quoteSqlString(value: string): string {
+  return `'${value.replace(/'/g, "''")}'`;
 }
 
 function indexOfTopLevelKeyword(text: string, keyword: string): number {
@@ -1368,6 +1556,79 @@ function buildCanonicalQuery(
     .map(col => (col.sqlAlias ? `${col.sqlExpr} AS ${col.sqlAlias}` : col.sqlExpr))
     .join(', ');
   return `SELECT${distinct ? ' DISTINCT' : ''} ${selectList} ${fromAndJoinsSql}${tailClauses ? ' ' + tailClauses : ''}`;
+}
+
+type ParsedCaseExpression = {
+  outputColumn: string;
+  expression: string;
+  inputRefs: Array<{ expr: string; label: string }>;
+  branches: Array<{ condition: string; label: string }>;
+  elseLabel: string;
+};
+
+function parseCaseExpression(
+  item: string,
+  resultColumns: string[],
+  availableInputColumns: string[],
+): ParsedCaseExpression | null {
+  const aliasMatch = item.match(/^(CASE[\s\S]+?END)(?:\s+AS\s+`?([A-Za-z_][A-Za-z0-9_]*)`?)?$/i);
+  const expr = aliasMatch ? aliasMatch[1].trim() : item.trim();
+  const alias = aliasMatch?.[2];
+  if (!/^CASE\b/i.test(expr)) {
+    return null;
+  }
+
+  const innerBody = expr.replace(/^CASE\b/i, '').replace(/\bEND$/i, '').trim();
+  if (!innerBody) {
+    return null;
+  }
+
+  let cursor = 0;
+  const branches: Array<{ condition: string; label: string }> = [];
+  let elseLabel = 'ELSE';
+
+  while (cursor < innerBody.length) {
+    cursor = skipSqlWhitespace(innerBody, cursor);
+    if (matchesWordAt(innerBody, cursor, 'WHEN')) {
+      const condStart = skipSqlWhitespace(innerBody, cursor + 4);
+      const thenIndex = findNextTopLevelKeyword(innerBody, condStart, ['THEN']);
+      if (thenIndex === -1) {
+        return null;
+      }
+      const condition = innerBody.slice(condStart, thenIndex).trim();
+      const resultStart = skipSqlWhitespace(innerBody, thenIndex + 4);
+      const nextIndex = findNextTopLevelKeyword(innerBody, resultStart, ['WHEN', 'ELSE']);
+      const resultExpr = innerBody.slice(resultStart, nextIndex === -1 ? innerBody.length : nextIndex).trim();
+      branches.push({
+        condition,
+        label: `WHEN ${condition} THEN ${resultExpr}`,
+      });
+      cursor = nextIndex === -1 ? innerBody.length : nextIndex;
+      continue;
+    }
+    if (matchesWordAt(innerBody, cursor, 'ELSE')) {
+      const elseStart = skipSqlWhitespace(innerBody, cursor + 4);
+      const elseExpr = innerBody.slice(elseStart).trim();
+      elseLabel = `ELSE ${elseExpr}`;
+      break;
+    }
+    cursor += 1;
+  }
+
+  if (branches.length === 0) {
+    return null;
+  }
+
+  const outputColumn = resolveCaseOutputColumn(alias, expr, resultColumns);
+  const inputRefs = extractCaseInputRefs(branches.map(branch => branch.condition), availableInputColumns);
+
+  return {
+    outputColumn,
+    expression: item.trim(),
+    inputRefs,
+    branches,
+    elseLabel,
+  };
 }
 
 function buildFinalQuery(parsed: ParsedQuery, opts: { upTo: 'GROUP BY' | 'HAVING' | 'SELECT' | 'ORDER BY' | 'LIMIT' }): string {

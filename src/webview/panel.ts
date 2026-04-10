@@ -142,6 +142,7 @@ function renderApp(input: { sql: string; source: string; connectionLabel: string
 
       let currentStepIndex = 0;
       let activeWindowColumn = null;
+      let activeCaseCell = null;
       let distinctPanelOpen = false;
       const app = document.getElementById('app');
 
@@ -222,9 +223,13 @@ function renderApp(input: { sql: string; source: string; connectionLabel: string
         const rowDelta = step.rowsAfter - deltaBaseline;
         if (step.name !== 'SELECT') {
           activeWindowColumn = null;
+          activeCaseCell = null;
         }
         if (step.name !== 'SELECT' || !step.distinctMeta) {
           distinctPanelOpen = false;
+        }
+        if (step.name !== 'SELECT' || !Array.isArray(step.caseColumns) || step.caseColumns.length === 0) {
+          activeCaseCell = null;
         }
         app.innerHTML = \`
           <div class="topbar card">
@@ -280,6 +285,7 @@ function renderApp(input: { sql: string; source: string; connectionLabel: string
         bindJoinClicks(step);
         bindGroupBreakdown(step);
         bindWindowDetails(step);
+        bindCaseDetails(step);
         bindDistinctPanel(step);
 
         // Notify the extension host which step is now active so it can apply
@@ -653,6 +659,66 @@ function renderApp(input: { sql: string; source: string; connectionLabel: string
           </div>\`;
       }
 
+      function bindCaseDetails(step) {
+        if (step.name !== 'SELECT' || !Array.isArray(step.caseColumns) || step.caseColumns.length === 0) {
+          return;
+        }
+
+        const container = document.getElementById('caseWhenDetail');
+        if (!container) return;
+
+        if (activeCaseCell) {
+          container.innerHTML = renderCaseDetail(step, activeCaseCell.column, activeCaseCell.rowIndex);
+        }
+
+        document.querySelectorAll('[data-case-column]').forEach((el) => {
+          el.addEventListener('click', () => {
+            const column = el.getAttribute('data-case-column');
+            const rowIndex = parseInt(el.getAttribute('data-case-row') || '-1', 10);
+            if (!column || rowIndex < 0) return;
+            const sameCell = activeCaseCell && activeCaseCell.column === column && activeCaseCell.rowIndex === rowIndex;
+            activeCaseCell = sameCell ? null : { column, rowIndex };
+            container.innerHTML = activeCaseCell ? renderCaseDetail(step, activeCaseCell.column, activeCaseCell.rowIndex) : '';
+            document.querySelectorAll('[data-case-column]').forEach(node => node.classList.remove('activeCaseCell'));
+            if (activeCaseCell) {
+              el.classList.add('activeCaseCell');
+            }
+          });
+        });
+      }
+
+      function renderCaseDetail(step, outputColumn, rowIndex) {
+        const meta = (step.caseColumns || []).find(col => col.outputColumn === outputColumn);
+        const rowMeta = meta?.rowExplanations?.[rowIndex];
+        if (!meta || !rowMeta) return '';
+
+        const inputValuesHtml = rowMeta.inputValues.length > 0
+          ? rowMeta.inputValues.map(item =>
+              \`<div class="caseInputItem"><span class="caseInputName">\${escapeHtml(item.column)}</span><span class="caseInputValue">\${escapeHtml(item.value === null ? 'NULL' : String(item.value))}</span></div>\`
+            ).join('')
+          : '<div class="caseInputEmpty">No direct input columns were captured for this CASE condition.</div>';
+
+        return \`
+          <div class="card caseDetailCard">
+            <div class="sectionTitle">CASE WHEN explanation</div>
+            <div class="caseDetailSentence">This row matched a CASE branch that returned the selected value shown in \${escapeHtml(outputColumn)}.</div>
+            <div class="caseDetailGrid">
+              <div class="caseDetailBlock">
+                <div class="caseDetailLabel">Relevant inputs</div>
+                <div class="caseInputList">\${inputValuesHtml}</div>
+              </div>
+              <div class="caseDetailBlock">
+                <div class="caseDetailLabel">Matched rule</div>
+                <div class="caseRuleValue">\${escapeHtml(rowMeta.matchedRule)}</div>
+              </div>
+              <div class="caseDetailBlock">
+                <div class="caseDetailLabel">Returned value</div>
+                <div class="caseReturnedValue">\${escapeHtml(rowMeta.returnedValue === null ? 'NULL' : String(rowMeta.returnedValue))}</div>
+              </div>
+            </div>
+          </div>\`;
+      }
+
       function formatWindowSummary(meta) {
         const partitionText = meta.partitionBy.length > 0 ? meta.partitionBy.join(', ') : 'all rows';
         const orderText = meta.orderByTerms.length > 0
@@ -866,6 +932,7 @@ function renderApp(input: { sql: string; source: string; connectionLabel: string
         // Aggregation columns — badge shows the function name (COUNT, SUM, …); no cell tint.
         const aggColMap     = new Map((step.aggColumns || []).map(a => [a.col, a.fn]));
         const windowColMap  = new Map((step.windowColumns || []).map(w => [w.outputColumn, w]));
+        const caseColSet    = new Set((step.caseColumns || []).map(c => c.outputColumn));
         const limitedRows = step.data;
         const headerHtml = step.columns.map((c) => {
           const isJoined  = joinIndicatorColumns.includes(c);
@@ -900,6 +967,7 @@ function renderApp(input: { sql: string; source: string; connectionLabel: string
             const isDupe    = isDupeCol(col);
             const isSort    = sortColSet.has(col);
             const isGroupBy = groupByColSet.has(col);
+            const isCase    = step.name === 'SELECT' && caseColSet.has(col);
             // Agg columns: badge only in header — cells stay default to keep table scannable.
             // join-key columns: no cell tint in the intermediate result table.
             const cls = isDupe    ? 'dupeColCell'
@@ -907,7 +975,9 @@ function renderApp(input: { sql: string; source: string; connectionLabel: string
                       : isGroupBy ? 'groupByColCell'
                       : isSort    ? 'sortColCell'
                       : '';
-            return \`<td class="\${cls}">\${escapeHtml(row[col])}</td>\`;
+            return isCase
+              ? \`<td class="\${cls} caseCell \${activeCaseCell && activeCaseCell.column === col && activeCaseCell.rowIndex === rowIdx ? 'activeCaseCell' : ''}" data-case-column="\${escapeAttr(col)}" data-case-row="\${rowIdx}">\${escapeHtml(row[col])}</td>\`
+              : \`<td class="\${cls}">\${escapeHtml(row[col])}</td>\`;
           }).join('');
           const rowAttrs = isGroupByStep
             ? \`class="groupRow" data-rowindex="\${rowIdx}"\`
@@ -931,6 +1001,9 @@ function renderApp(input: { sql: string; source: string; connectionLabel: string
         const windowDetailSlot = step.name === 'SELECT' && windowColMap.size > 0
           ? '<div id="windowFunctionDetail"></div>'
           : '';
+        const caseDetailSlot = step.name === 'SELECT' && caseColSet.size > 0
+          ? '<div id="caseWhenDetail"></div>'
+          : '';
 
         return \`
           <div class="card">
@@ -950,6 +1023,7 @@ function renderApp(input: { sql: string; source: string; connectionLabel: string
             </div>
           </div>
           \${windowDetailSlot}
+          \${caseDetailSlot}
           \${breakdownSlot}\`;
       }
 
@@ -1498,6 +1572,69 @@ function styles(): string {
       margin-bottom: 8px;
       line-height: 1.45;
     }
+    .caseCell {
+      cursor: pointer;
+      box-shadow: inset 0 0 0 1px rgba(90,145,255,.12);
+    }
+    .caseCell:hover {
+      background: rgba(122,162,255,.10);
+    }
+    td.activeCaseCell {
+      background: rgba(122,162,255,.18);
+      box-shadow: inset 0 0 0 1px rgba(122,162,255,.42);
+    }
+    .caseDetailCard {
+      margin-top: 0;
+    }
+    .caseDetailSentence {
+      font-size: 11px;
+      color: var(--text);
+      line-height: 1.45;
+      margin-bottom: 8px;
+    }
+    .caseDetailGrid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 10px;
+    }
+    .caseDetailBlock {
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: rgba(8, 16, 40, 0.45);
+      padding: 10px 12px;
+    }
+    .caseDetailLabel {
+      font-size: 9px;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      margin-bottom: 6px;
+    }
+    .caseInputList {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+    .caseInputItem {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      font-size: 11px;
+    }
+    .caseInputName {
+      color: var(--muted);
+    }
+    .caseInputValue, .caseRuleValue, .caseReturnedValue {
+      color: var(--text);
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      word-break: break-word;
+    }
+    .caseInputEmpty {
+      font-size: 11px;
+      color: var(--muted);
+      line-height: 1.4;
+    }
     .windowPartitionBreak td {
       border-top: 3px solid rgba(122,162,255,.45);
     }
@@ -1675,6 +1812,7 @@ function styles(): string {
     @media (max-width: 900px) {
       .joinPreviewGrid { grid-template-columns: 1fr; }
       .stats { flex-wrap: wrap; }
+      .caseDetailGrid { grid-template-columns: 1fr; }
     }
   `;
 }
