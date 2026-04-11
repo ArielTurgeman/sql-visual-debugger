@@ -86,5 +86,5 @@ export type ConnectionConfig = {
 };
 
 export type ExtractResult =
-    | { sql: string; source: string }
+    | { sql: string; source: string; rawText: string; selectionStart: import('vscode').Position }
     | { error: string };

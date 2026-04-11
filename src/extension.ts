@@ -198,21 +198,11 @@ async function runDebugger(context: vscode.ExtensionContext): Promise<void> {
         return;
     }
 
-    // 2. Capture the raw (unsanitized) text and document URI now, before
-    //    sanitizeSql collapses whitespace.  We need the original text later
-    //    to map step clause fragments back to exact editor positions for
-    //    the active-step highlight decorations.
-    const rawText     = !editor.selection.isEmpty
-        ? editor.document.getText(editor.selection)
-        : editor.document.getText();
-    const documentUri = editor.document.uri;
-    const selectionStart = !editor.selection.isEmpty
-        ? editor.selection.start
-        : new vscode.Position(0, 0);
-
-    // 3. Extract and validate SQL
+    // 2. Extract and validate the exact SQL input for this run.
     let sql: string;
     let source: string;
+    let rawText: string;
+    let selectionStart: vscode.Position;
     try {
         const result = extractQuery(editor);
         if ('error' in result) {
@@ -221,13 +211,16 @@ async function runDebugger(context: vscode.ExtensionContext): Promise<void> {
         }
         sql = result.sql;
         source = result.source;
+        rawText = result.rawText;
+        selectionStart = result.selectionStart;
     } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
         vscode.window.showErrorMessage(`SQL Debugger: ${msg}`);
         return;
     }
 
-    // 4. Persist so in-panel switches can re-run without re-reading the editor
+    // 3. Persist so in-panel switches can re-run without re-reading the editor.
+    const documentUri = editor.document.uri;
     lastRun = { sql, source, rawText, documentUri, selectionStart };
 
     // 4b. Try to detect the active database from the editor context (USE statement,
