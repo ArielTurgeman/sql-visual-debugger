@@ -177,6 +177,11 @@ function renderApp(input: { sql: string; source: string; connectionLabel: string
         return groups;
       }
 
+      function hasNestedQueryContext() {
+        const groups = getBlockGroups();
+        return groups.length > 1 || groups.some(group => group.blockType !== 'main');
+      }
+
       function formatBlockLabel(step) {
         if (step.blockType === 'cte') {
           const group = getBlockGroups().find(g => g.key === \`\${step.blockType}:\${step.blockName}\`);
@@ -190,6 +195,10 @@ function renderApp(input: { sql: string; source: string; connectionLabel: string
       }
 
       function renderBlockSummary(step) {
+        if (!hasNestedQueryContext()) {
+          return '';
+        }
+
         const deps = Array.isArray(step.blockDependencies) && step.blockDependencies.length > 0
           ? \`<div class="blockDeps">Depends on: \${escapeHtml(step.blockDependencies.join(', '))}</div>\`
           : '';
@@ -219,6 +228,7 @@ function renderApp(input: { sql: string; source: string; connectionLabel: string
 
       function render() {
         const step = state.steps[currentStepIndex];
+        const showBlockContext = hasNestedQueryContext();
         const deltaBaseline = step.sourceRows !== undefined ? step.sourceRows : step.rowsBefore;
         const rowDelta = step.rowsAfter - deltaBaseline;
         if (step.name !== 'SELECT') {
@@ -235,7 +245,7 @@ function renderApp(input: { sql: string; source: string; connectionLabel: string
           <div class="topbar card">
             <div class="topbarInfo">
               <div class="title">SQL Debugger</div>
-              <div class="sub blockContextLine">\${escapeHtml(formatBlockLabel(step))}</div>
+              \${showBlockContext ? \`<div class="sub blockContextLine">\${escapeHtml(formatBlockLabel(step))}</div>\` : ''}
               <div class="sub"><span class="connLabel">\${escapeHtml(state.connectionLabel)}</span> · \${escapeHtml(state.source)}</div>
             </div>
             <div class="topbarControls">
