@@ -1,7 +1,4 @@
 import * as vscode from 'vscode';
-import * as fs from 'fs';
-import * as os from 'os';
-import * as path from 'path';
 import { extractQuery } from './editor/queryExtractor';
 import { computeStepRanges } from './editor/rangeMapper';
 import { MysqlRunner } from './mysql/mysqlRunner';
@@ -11,45 +8,8 @@ import type { ConnectionConfig, ServerConnection } from './types';
 
 // ─── Trial ─────────────────────────────────────────────────────────────────
 
-const TRIAL_DAYS = 7;
-const TRIAL_FILE = path.join(os.homedir(), '.sqlvdbg-trial');
-
-/**
- * Returns true if the trial is still active, false if it has expired.
- * On the very first call it writes the current date to TRIAL_FILE.
- */
-function isTrialActive(): boolean {
-    let firstUse: number;
-
-    if (fs.existsSync(TRIAL_FILE)) {
-        const raw = fs.readFileSync(TRIAL_FILE, 'utf8').trim();
-        firstUse = parseInt(raw, 10);
-        if (isNaN(firstUse)) {
-            // Corrupted file — treat as if it was tampered; expire immediately.
-            return false;
-        }
-    } else {
-        // First ever launch — record the timestamp.
-        firstUse = Date.now();
-        try { fs.writeFileSync(TRIAL_FILE, String(firstUse), 'utf8'); } catch { /* ignore */ }
-    }
-
-    const elapsedMs   = Date.now() - firstUse;
-    const elapsedDays = elapsedMs / (1000 * 60 * 60 * 24);
-    return elapsedDays < TRIAL_DAYS;
-}
-
-/**
- * Checks the trial and shows the expiry message when it has ended.
- * Returns true if the caller should proceed, false if it should abort.
- */
 function checkTrial(): boolean {
-    if (isTrialActive()) { return true; }
-    vscode.window.showErrorMessage(
-        `SQL Visual Debugger — your ${TRIAL_DAYS}-day free trial has ended.`,
-        'OK'
-    );
-    return false;
+    return true;
 }
 
 // ─── Storage keys ──────────────────────────────────────────────────────────
@@ -128,7 +88,6 @@ export function activate(context: vscode.ExtensionContext): void {
     // Primary command — reads SQL from the active editor, then runs the debugger.
     context.subscriptions.push(
         vscode.commands.registerCommand('sqlDebugger.debugQuery', () => {
-            if (!checkTrial()) { return; }
             return runDebugger(context);
         })
     );
@@ -136,7 +95,6 @@ export function activate(context: vscode.ExtensionContext): void {
     // Utility: reconfigure the MySQL server (host / port / user only).
     context.subscriptions.push(
         vscode.commands.registerCommand('sqlDebugger.configureConnection', async () => {
-            if (!checkTrial()) { return; }
             const current = getServer(context);
             const updated = await promptForServer(context, current);
             if (updated) {
@@ -154,7 +112,6 @@ export function activate(context: vscode.ExtensionContext): void {
     // re-prompts for the password (different DB = different auth context).
     context.subscriptions.push(
         vscode.commands.registerCommand('sqlDebugger.changeConnection', async () => {
-            if (!checkTrial()) { return; }
             const db = await promptForDatabaseName(context);
             if (!db) { return; }
             await activateDatabase(context, db);

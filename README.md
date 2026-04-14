@@ -149,6 +149,114 @@ npm install
 npm run compile
 ```
 
+### Run tests
+
+```bash
+npm run test:unit
+```
+
+Current automated coverage includes:
+
+- query extraction behavior from the editor selection or cursor position
+- SQL sanitization and multi-statement rejection
+- query block parsing for main queries, non-recursive CTEs, and simple `FROM` subqueries
+- unsupported query-shape rejection such as recursive CTEs and non-equality joins
+- engine step execution for:
+  - `FROM`
+  - `JOIN`
+  - `WHERE`
+  - `GROUP BY`
+  - `HAVING`
+  - `SELECT`
+  - `ORDER BY`
+  - `LIMIT`
+- `SELECT DISTINCT` explanation metadata
+- `CASE` explanation metadata
+- window-function metadata for ranking and aggregate window functions
+- `WHERE IN` and scalar-subquery metadata
+- dependency flow from CTE blocks and materialized `FROM` subquery blocks
+
+Current test files:
+
+- [test/queryExtractor.test.js](/C:/Users/משתמש/Desktop/‏‏‏‏sqlclaudereservebackup/test/queryExtractor.test.js)
+- [test/queryBlocks.test.js](/C:/Users/משתמש/Desktop/‏‏‏‏sqlclaudereservebackup/test/queryBlocks.test.js)
+- [test/fromStep.test.js](/C:/Users/משתמש/Desktop/‏‏‏‏sqlclaudereservebackup/test/fromStep.test.js)
+- [test/joinStep.test.js](/C:/Users/משתמש/Desktop/‏‏‏‏sqlclaudereservebackup/test/joinStep.test.js)
+- [test/whereStep.test.js](/C:/Users/משתמש/Desktop/‏‏‏‏sqlclaudereservebackup/test/whereStep.test.js)
+- [test/groupByStep.test.js](/C:/Users/משתמש/Desktop/‏‏‏‏sqlclaudereservebackup/test/groupByStep.test.js)
+- [test/havingStep.test.js](/C:/Users/משתמש/Desktop/‏‏‏‏sqlclaudereservebackup/test/havingStep.test.js)
+- [test/selectStep.test.js](/C:/Users/משתמש/Desktop/‏‏‏‏sqlclaudereservebackup/test/selectStep.test.js)
+- [test/windowStep.test.js](/C:/Users/משתמש/Desktop/‏‏‏‏sqlclaudereservebackup/test/windowStep.test.js)
+- [test/orderByStep.test.js](/C:/Users/משתמש/Desktop/‏‏‏‏sqlclaudereservebackup/test/orderByStep.test.js)
+- [test/limitStep.test.js](/C:/Users/משתמש/Desktop/‏‏‏‏sqlclaudereservebackup/test/limitStep.test.js)
+- [test/cteStep.test.js](/C:/Users/משתמש/Desktop/‏‏‏‏sqlclaudereservebackup/test/cteStep.test.js)
+- [test/subqueryStep.test.js](/C:/Users/משתמש/Desktop/‏‏‏‏sqlclaudereservebackup/test/subqueryStep.test.js)
+
+## Engine Architecture
+
+The SQL debugging engine was refactored so `src/engine/stepEngine.ts` is now the orchestrator, and focused helpers live in separate modules.
+
+### Module map
+
+- [src/engine/stepEngine.ts](/C:/Users/משתמש/Desktop/‏‏‏‏sqlclaudereservebackup/src/engine/stepEngine.ts)
+  - top-level execution flow
+  - per-block orchestration
+  - row fetching helpers
+  - temp-table materialization for CTE/subquery blocks
+- [src/engine/stepEngineTypes.ts](/C:/Users/משתמש/Desktop/‏‏‏‏sqlclaudereservebackup/src/engine/stepEngineTypes.ts)
+  - shared engine types
+  - `DebugStep` and all step metadata types
+  - parsed-query helper types
+- [src/engine/stepEngineParsing.ts](/C:/Users/משתמש/Desktop/‏‏‏‏sqlclaudereservebackup/src/engine/stepEngineParsing.ts)
+  - SQL clause parsing
+  - canonical query builders
+  - select-item splitting
+  - window and CASE parsing helpers
+  - shared SQL token/identifier utilities
+- [src/engine/stepEngineMetadata.ts](/C:/Users/משתמש/Desktop/‏‏‏‏sqlclaudereservebackup/src/engine/stepEngineMetadata.ts)
+  - metadata detection/building for `WHERE`, `HAVING`, `GROUP BY`, `ORDER BY`, `SELECT`
+  - subquery metadata builders
+  - aggregate, CASE, and window metadata
+- [src/engine/stepEngineExplain.ts](/C:/Users/משתמש/Desktop/‏‏‏‏sqlclaudereservebackup/src/engine/stepEngineExplain.ts)
+  - join display row construction
+  - join relationship inference
+  - window explanation text and preview-row helpers
+- [src/engine/stepEngineStepBuilders.ts](/C:/Users/משתמש/Desktop/‏‏‏‏sqlclaudereservebackup/src/engine/stepEngineStepBuilders.ts)
+  - construction of `DebugStep` objects for each clause
+  - block-context attachment
+
+### Where to add code
+
+When changing the engine, use this routing guide:
+
+- Add or change SQL parsing logic in `stepEngineParsing.ts`.
+- Add or change derived metadata for UI panels in `stepEngineMetadata.ts`.
+- Add or change human-readable explanations, preview ordering, or join display shaping in `stepEngineExplain.ts`.
+- Add or change the shape/content of clause step objects in `stepEngineStepBuilders.ts`.
+- Add or change orchestration order, query execution flow, or temp-table lifecycle in `stepEngine.ts`.
+- Add or change shared step/meta types in `stepEngineTypes.ts`.
+
+### Practical examples
+
+- New supported clause parsing:
+  start in `stepEngineParsing.ts`, then wire it into `stepEngine.ts`, then add tests.
+- New panel metadata for an existing clause:
+  start in `stepEngineMetadata.ts`, then expose it through the relevant step builder or `stepEngine.ts`, then add tests.
+- Better explanation text without behavioral changes:
+  start in `stepEngineExplain.ts` or `stepEngineStepBuilders.ts`, depending on whether the text is helper-derived or directly attached to a step.
+- New `DebugStep` fields consumed by the webview:
+  define the type in `stepEngineTypes.ts`, populate it in `stepEngine.ts` or `stepEngineStepBuilders.ts`, and cover it with tests.
+
+### Workflow for future prompts
+
+If a future task asks to extend SQL support or engine behavior, use this sequence:
+
+1. Find the affected clause or helper in the engine module map above.
+2. Update or add tests in the matching `test/*.test.js` file first when practical.
+3. Make the engine change in the smallest correct module instead of growing `stepEngine.ts`.
+4. Run `npm run compile` and `npm run test:unit`.
+5. Update this README section if the architecture, coverage, or code-placement guidance changes.
+
 ### Run the extension
 
 Launch the extension in VS Code using the provided Extension Host launch configuration.
