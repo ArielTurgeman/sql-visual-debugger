@@ -1456,8 +1456,9 @@ function buildJoinDisplay(
   );
   const outputColumns = [...leftCols, ...rightOutputKeys];
 
-  const isLeft  = /\bLEFT\b/i.test(joinType);
-  const isRight = /\bRIGHT\b/i.test(joinType);
+  const isFull  = /\bFULL\b/i.test(joinType);
+  const isLeft  = /\bLEFT\b/i.test(joinType) || isFull;
+  const isRight = /\bRIGHT\b/i.test(joinType) || isFull;
   const isCross = /\bCROSS\b/i.test(joinType);
 
   function mergeRow(
@@ -1725,7 +1726,7 @@ function removeDistinctFromSelectClause(selectClause: string): string {
 }
 
 function parseFromAndJoins(fromAndJoins: string): { baseClause: string; joins: ParsedJoin[] } {
-  const joinRegex = /\b((?:INNER|LEFT|RIGHT|FULL|CROSS)?\s*JOIN)\b/ig;
+  const joinRegex = /\b((?:(?:INNER|LEFT|RIGHT|FULL)(?:\s+OUTER)?|CROSS)?\s*JOIN)\b/ig;
   const matches = [...fromAndJoins.matchAll(joinRegex)];
   if (matches.length === 0) {
     return { baseClause: fromAndJoins.trim(), joins: [] };
@@ -1748,7 +1749,7 @@ function parseFromAndJoins(fromAndJoins: string): { baseClause: string; joins: P
 
     const joinHeader = pieces[0].trim();
     const onClause = pieces[1].trim();
-    const headerMatch = joinHeader.match(/^((?:INNER|LEFT|RIGHT|FULL|CROSS)?\s*JOIN)\s+([\w`\.]+)(?:\s+(?:AS\s+)?([\w`]+))?$/i);
+    const headerMatch = joinHeader.match(/^((?:(?:INNER|LEFT|RIGHT|FULL)(?:\s+OUTER)?|CROSS)?\s*JOIN)\s+([\w`\.]+)(?:\s+(?:AS\s+)?([\w`]+))?$/i);
     if (!headerMatch) {
       throw new Error('Unsupported JOIN shape in this MVP.');
     }

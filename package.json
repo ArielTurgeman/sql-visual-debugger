@@ -55,7 +55,9 @@
     ]
   },
   "scripts": {
-    "compile": "tsc -p ./"
+    "compile": "tsc -p ./",
+    "test:unit": "node test/run-tests.js",
+    "test": "npm run compile && npm run test:unit"
   },
   "dependencies": {
     "mysql2": "^3.9.7"
