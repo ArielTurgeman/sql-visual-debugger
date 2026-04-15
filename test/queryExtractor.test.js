@@ -134,6 +134,32 @@ SELECT * FROM orders;
     });
   });
 
+  runTest('extractQuery keeps a non-recursive CTE and its main SELECT as one statement under the cursor', () => {
+    const sql = `
+-- 9) CTE
+WITH experienced_players AS (
+    SELECT PlayerId, PlayerName, TeamId, Team, YearsInLeague
+    FROM playerinfo
+    WHERE YearsInLeague >= 5
+)
+SELECT e.PlayerId, e.PlayerName, e.Team, t.TeamId
+FROM experienced_players e
+INNER JOIN teaminfo t
+  ON e.TeamId = t.TeamId
+ORDER BY e.YearsInLeague DESC, e.PlayerName
+LIMIT 20;
+    `.trim();
+    const cursorOffset = sql.indexOf('ORDER BY e.YearsInLeague DESC');
+
+    const result = extractQuery(createEditor(sql, { cursorOffset }));
+
+    assert.ok(!('error' in result));
+    assert.equal(
+      result.sql,
+      'WITH experienced_players AS ( SELECT PlayerId, PlayerName, TeamId, Team, YearsInLeague FROM playerinfo WHERE YearsInLeague >= 5 ) SELECT e.PlayerId, e.PlayerName, e.Team, t.TeamId FROM experienced_players e INNER JOIN teaminfo t ON e.TeamId = t.TeamId ORDER BY e.YearsInLeague DESC, e.PlayerName LIMIT 20',
+    );
+  });
+
   runTest('extractQuery rejects non-SELECT statements such as INSERT, UPDATE, and DELETE', () => {
     for (const sql of [
       'INSERT INTO users (id) VALUES (1)',

@@ -114,7 +114,7 @@ function splitStatements(text: string): StatementSlice[] {
     let lineComment = false;
     let blockComment = false;
     let parenDepth = 0;
-    let currentStatementHasRoot = false;
+    let currentStatementRoot: 'SELECT' | 'WITH' | null = null;
     let lineHasCode = false;
 
     while (i < text.length) {
@@ -208,7 +208,7 @@ function splitStatements(text: string): StatementSlice[] {
         if (char === ';') {
             boundaries.push({ start: statementStart, end: i });
             statementStart = i + 1;
-            currentStatementHasRoot = false;
+            currentStatementRoot = null;
             lineHasCode = false;
             i += 1;
             continue;
@@ -217,11 +217,17 @@ function splitStatements(text: string): StatementSlice[] {
         if (!lineHasCode && parenDepth === 0) {
             const rootMatch = text.slice(i).match(/^(SELECT|WITH)\b/i);
             if (rootMatch) {
-                if (currentStatementHasRoot) {
+                const rootKeyword = rootMatch[1].toUpperCase() as 'SELECT' | 'WITH';
+                const startsMainSelectForWith =
+                    currentStatementRoot === 'WITH' && rootKeyword === 'SELECT';
+
+                if (currentStatementRoot && !startsMainSelectForWith) {
                     boundaries.push({ start: statementStart, end: i });
                     statementStart = i;
                 }
-                currentStatementHasRoot = true;
+                if (!currentStatementRoot) {
+                    currentStatementRoot = rootKeyword;
+                }
             }
         }
 
