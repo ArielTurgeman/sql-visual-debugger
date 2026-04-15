@@ -349,7 +349,7 @@ function renderApp(input: { sql: string; source: string; connectionLabel: string
         return rows.map((row, rowIdx) => {
           const joinValue = row[joinKey];
           const cells = columns.map(col =>
-            \`<td\${col === joinKey ? ' class="joinCell"' : ''}>\${escapeHtml(row[col])}</td>\`
+            \`<td\${col === joinKey ? ' class="joinCell"' : ''}>\${renderCellValue(row[col])}</td>\`
           ).join('');
           return \`<tr data-side="\${side}" data-row-index="\${rowIdx}" data-join-value="\${escapeAttr(joinValue)}">\${cells}</tr>\`;
         }).join('');
@@ -547,7 +547,7 @@ function renderApp(input: { sql: string; source: string; connectionLabel: string
           \`<tr>\${preCols.map(c => {
             const bare  = (c.includes('.') ? c.split('.').pop() : c).toLowerCase();
             const isAgg = aggSrcMap.has(bare);
-            return \`<td\${isAgg ? ' class="bdAggSrcCell"' : ''}>\${escapeHtml(row[c])}</td>\`;
+            return \`<td\${isAgg ? ' class="bdAggSrcCell"' : ''}>\${renderCellValue(row[c])}</td>\`;
           }).join('')}</tr>\`
         ).join('');
 
@@ -651,7 +651,7 @@ function renderApp(input: { sql: string; source: string; connectionLabel: string
           const shouldSeparate = meta.partitionBy.length > 0 && previousPartitionKey !== null && previousPartitionKey !== currentPartitionKey;
           previousPartitionKey = currentPartitionKey;
           const tintClass = \`windowPartitionTint\${partitionKeys.indexOf(currentPartitionKey || '__all__') % 5}\`;
-          const rowHtml = \`<tr class="\${shouldSeparate ? 'windowPartitionBreak ' : ''}\${tintClass}" data-partition-key="\${escapeAttr(currentPartitionKey || '__all__')}">\${previewColumns.map(col => \`<td>\${escapeHtml(row[col])}</td>\`).join('')}</tr>\`;
+          const rowHtml = \`<tr class="\${shouldSeparate ? 'windowPartitionBreak ' : ''}\${tintClass}" data-partition-key="\${escapeAttr(currentPartitionKey || '__all__')}">\${previewColumns.map(col => \`<td>\${renderCellValue(row[col])}</td>\`).join('')}</tr>\`;
           return rowHtml;
         }).join('');
 
@@ -706,7 +706,7 @@ function renderApp(input: { sql: string; source: string; connectionLabel: string
 
         const inputValuesHtml = rowMeta.inputValues.length > 0
           ? rowMeta.inputValues.map(item =>
-              \`<div class="caseInputItem"><span class="caseInputName">\${escapeHtml(item.column)}</span><span class="caseInputValue">\${escapeHtml(item.value === null ? 'NULL' : String(item.value))}</span></div>\`
+              \`<div class="caseInputItem"><span class="caseInputName">\${escapeHtml(item.column)}</span><span class="caseInputValue">\${renderCellValue(item.value)}</span></div>\`
             ).join('')
           : '<div class="caseInputEmpty">No direct input columns were captured for this CASE condition.</div>';
 
@@ -725,7 +725,7 @@ function renderApp(input: { sql: string; source: string; connectionLabel: string
               </div>
               <div class="caseDetailBlock">
                 <div class="caseDetailLabel">Returned value</div>
-                <div class="caseReturnedValue">\${escapeHtml(rowMeta.returnedValue === null ? 'NULL' : String(rowMeta.returnedValue))}</div>
+                <div class="caseReturnedValue">\${renderCellValue(rowMeta.returnedValue)}</div>
               </div>
             </div>
           </div>\`;
@@ -785,7 +785,7 @@ function renderApp(input: { sql: string; source: string; connectionLabel: string
             // colour connotation (box-shadow does not affect layout/column widths).
             const cells = cols.map(c => {
               const isWhere = whereCols.has(c);
-              return \`<td style="\${isWhere ? 'box-shadow:inset 2px 0 0 rgba(246,223,108,.28);' : ''}">\${escapeHtml(row[c])}</td>\`;
+              return \`<td style="\${isWhere ? 'box-shadow:inset 2px 0 0 rgba(246,223,108,.28);' : ''}">\${renderCellValue(row[c])}</td>\`;
             }).join('');
             return \`<tr>\${cells}</tr>\`;
           } else {
@@ -797,7 +797,7 @@ function renderApp(input: { sql: string; source: string; connectionLabel: string
               const bg = isWhere
                 ? 'background:rgba(255,80,80,.28);'
                 : 'background:rgba(255,80,80,.10);';
-              return \`<td style="\${bg}text-decoration:line-through;">\${escapeHtml(row[c])}</td>\`;
+              return \`<td style="\${bg}text-decoration:line-through;">\${renderCellValue(row[c])}</td>\`;
             }).join('');
             return \`<tr style="opacity:.62;">\${cells}</tr>\`;
           }
@@ -827,7 +827,7 @@ function renderApp(input: { sql: string; source: string; connectionLabel: string
         const columns = meta.columns || [];
         const headerHtml = columns.map(c => \`<th>\${escapeHtml(c)}</th>\`).join('');
         const bodyHtml = (meta.rows || []).length > 0
-          ? meta.rows.map(row => \`<tr>\${columns.map(c => \`<td>\${escapeHtml(row[c])}</td>\`).join('')}</tr>\`).join('')
+          ? meta.rows.map(row => \`<tr>\${columns.map(c => \`<td>\${renderCellValue(row[c])}</td>\`).join('')}</tr>\`).join('')
           : \`<tr><td colspan="\${Math.max(columns.length, 1)}" class="noMatchCell">No rows</td></tr>\`;
         const countLabel = meta.rows.length < meta.totalRows
           ? \`Showing \${formatNumber(meta.rows.length)} of \${formatNumber(meta.totalRows)} row(s) <span class="truncatedHint">(display limit reached)</span>\`
@@ -852,7 +852,7 @@ function renderApp(input: { sql: string; source: string; connectionLabel: string
             <div class="whereSubqueryExplanation">\${escapeHtml(meta.explanation)}</div>
             <div class="whereScalarCard">
               <div class="whereScalarLabel">Subquery value</div>
-              <div class="whereScalarValue">\${escapeHtml(meta.value === null ? 'NULL' : String(meta.value))}</div>
+              <div class="whereScalarValue">\${renderCellValue(meta.value)}</div>
               <div class="whereScalarMeta">\${escapeHtml(meta.columnLabel)}</div>
             </div>
           </div>\`;
@@ -906,7 +906,7 @@ function renderApp(input: { sql: string; source: string; connectionLabel: string
               const style = removed
                 ? 'background:rgba(255,80,80,.10);text-decoration:line-through;'
                 : '';
-              return \`<td style="\${style}">\${escapeHtml(row[c])}</td>\`;
+              return \`<td style="\${style}">\${renderCellValue(row[c])}</td>\`;
             }).join('');
             return \`<tr\${removed ? ' style="opacity:.62;"' : ''}>\${cells}</tr>\`;
           }).join('')
@@ -988,8 +988,8 @@ function renderApp(input: { sql: string; source: string; connectionLabel: string
                       : isSort    ? 'sortColCell'
                       : '';
             return isCase
-              ? \`<td class="\${cls} caseCell \${activeCaseCell && activeCaseCell.column === col && activeCaseCell.rowIndex === rowIdx ? 'activeCaseCell' : ''}" data-case-column="\${escapeAttr(col)}" data-case-row="\${rowIdx}">\${escapeHtml(row[col])}</td>\`
-              : \`<td class="\${cls}\${isGroupByStep && isGroupBy ? ' groupByClickableCell' : ''}">\${escapeHtml(row[col])}</td>\`;
+              ? \`<td class="\${cls} caseCell \${activeCaseCell && activeCaseCell.column === col && activeCaseCell.rowIndex === rowIdx ? 'activeCaseCell' : ''}" data-case-column="\${escapeAttr(col)}" data-case-row="\${rowIdx}">\${renderCellValue(row[col])}</td>\`
+              : \`<td class="\${cls}\${isGroupByStep && isGroupBy ? ' groupByClickableCell' : ''}">\${renderCellValue(row[col])}</td>\`;
           }).join('');
           const rowAttrs = isGroupByStep
             ? \`class="groupRow" data-rowindex="\${rowIdx}"\`
@@ -1059,6 +1059,13 @@ function renderApp(input: { sql: string; source: string; connectionLabel: string
       function formatSigned(value) {
         const n = Number(value || 0);
         return n > 0 ? \`+\${n}\` : \`\${n}\`;
+      }
+
+      function renderCellValue(value) {
+        if (value === null || value === undefined) {
+          return '<span class="nullValue">NULL</span>';
+        }
+        return escapeHtml(value);
       }
 
       function jumpToStep(idx) {
@@ -1389,6 +1396,12 @@ function styles(): string {
     .expWhat  { font-size: 12px; line-height: 1.5; color: var(--text); }
     .expImpact { font-size: 11px; color: var(--muted); line-height: 1.4; margin-top: 3px; }
     .sqlLabel { font-size: 10px; color: var(--muted); margin-top: 6px; margin-bottom: 1px; display: block; letter-spacing: 0.02em; text-transform: uppercase; }
+    .nullValue {
+      color: #8b93a7;
+      font-weight: 600;
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      letter-spacing: 0.01em;
+    }
     /* Row-delta colour coding */
     .deltaPos { color: #43c882; }
     .deltaNeg { color: #ff7070; }
