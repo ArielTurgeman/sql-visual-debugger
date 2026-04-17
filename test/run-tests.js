@@ -4,6 +4,7 @@ const suites = [
   require('./queryExtractor.test'),
   require('./queryBlocks.test'),
   require('./mysqlRunner.test'),
+  require('./webviewPanel.test'),
   require('./cteStep.test'),
   require('./fromStep.test'),
   require('./groupByStep.test'),

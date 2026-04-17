@@ -196,7 +196,12 @@ function renderApp(input: { sql: string; source: string; connectionLabel: string
 
       function renderBlockSummary(step) {
         if (!hasNestedQueryContext()) {
-          return '';
+          return \`
+          <div class="blockSummary">
+            <span class="blockBadge mainBadge">\${escapeHtml('Main Query')}</span>
+            <span class="blockName">\${escapeHtml('MAIN QUERY')}</span>
+          </div>
+          <div class="groupedFlowShell">\${renderFlowBlocks()}</div>\`;
         }
 
         const deps = Array.isArray(step.blockDependencies) && step.blockDependencies.length > 0
@@ -220,7 +225,7 @@ function renderApp(input: { sql: string; source: string; connectionLabel: string
           <div class="flowBlock \${group.key === activeKey ? 'activeBlock' : ''}">
             <div class="flowBlockLabel">\${escapeHtml(group.blockType === 'cte' ? \`CTE \${group.cteNumber}: \${group.blockName}\` : group.blockType === 'subquery' ? \`SUBQUERY \${group.subqueryNumber}: \${group.blockName}\` : 'MAIN QUERY')}</div>
             <div class="flowBlockNodes">
-              \${group.steps.map(({ step, idx }) => \`<span class="flowNode \${idx === currentStepIndex ? "active" : ""}" onclick="jumpToStep(\${idx})">\${escapeHtml(step.name)}</span>\`).join(\`<span class="arrow">ג†’</span>\`)}
+              \${group.steps.map(({ step, idx }) => \`<button type="button" class="flowNode flowNodeBtn \${idx === currentStepIndex ? "active" : ""}" data-step-index="\${idx}">\${escapeHtml(step.name)}</button>\`).join(\`<span class="arrow">ג†’</span>\`)}
             </div>
           </div>\`
         ).join('');
@@ -257,7 +262,7 @@ function renderApp(input: { sql: string; source: string; connectionLabel: string
             </div>
           </div>
 
-          <div class="flow card">\${state.steps.map((s, idx) => \`<span class="flowNode \${idx === currentStepIndex ? "active" : ""}" onclick="jumpToStep(\${idx})">\${escapeHtml(s.name)}</span>\`).join(\`<span class="arrow">→</span>\`)}</div>
+          <div class="flow card">\${state.steps.map((s, idx) => \`<button type="button" class="flowNode flowNodeBtn \${idx === currentStepIndex ? "active" : ""}" data-step-index="\${idx}">\${escapeHtml(s.name)}</button>\`).join(\`<span class="arrow">→</span>\`)}</div>
 
           <div class="card">
             \${renderBlockSummary(step)}
@@ -297,6 +302,7 @@ function renderApp(input: { sql: string; source: string; connectionLabel: string
         bindWindowDetails(step);
         bindCaseDetails(step);
         bindDistinctPanel(step);
+        bindFlowClicks();
 
         // Notify the extension host which step is now active so it can apply
         // the corresponding editor decoration.  Sent after every render(),
@@ -1073,6 +1079,18 @@ function renderApp(input: { sql: string; source: string; connectionLabel: string
         render();
       }
 
+      function bindFlowClicks() {
+        document.querySelectorAll('.flowNodeBtn[data-step-index]').forEach((node) => {
+          node.addEventListener('click', () => {
+            const idx = Number(node.getAttribute('data-step-index'));
+            if (!Number.isInteger(idx) || idx < 0 || idx >= state.steps.length || idx === currentStepIndex) {
+              return;
+            }
+            jumpToStep(idx);
+          });
+        });
+      }
+
       render();
     </script>
   </body>
@@ -1324,6 +1342,11 @@ function styles(): string {
          compete visually with the sticky Prev / Next controls above. */
       color: var(--muted);
       opacity: 0.7;
+    }
+    .flowNodeBtn {
+      background: transparent;
+      font: inherit;
+      font-weight: 500;
     }
     .flowNode:hover { background: rgba(122,162,255,.10); opacity: 1; color: var(--text); }
     .flow { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
