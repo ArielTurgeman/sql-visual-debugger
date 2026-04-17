@@ -178,19 +178,19 @@ Current automated coverage includes:
 
 Current test files:
 
-- [test/queryExtractor.test.js](/C:/Users/משתמש/Desktop/‏‏‏‏sqlclaudereservebackup/test/queryExtractor.test.js)
-- [test/queryBlocks.test.js](/C:/Users/משתמש/Desktop/‏‏‏‏sqlclaudereservebackup/test/queryBlocks.test.js)
-- [test/fromStep.test.js](/C:/Users/משתמש/Desktop/‏‏‏‏sqlclaudereservebackup/test/fromStep.test.js)
-- [test/joinStep.test.js](/C:/Users/משתמש/Desktop/‏‏‏‏sqlclaudereservebackup/test/joinStep.test.js)
-- [test/whereStep.test.js](/C:/Users/משתמש/Desktop/‏‏‏‏sqlclaudereservebackup/test/whereStep.test.js)
-- [test/groupByStep.test.js](/C:/Users/משתמש/Desktop/‏‏‏‏sqlclaudereservebackup/test/groupByStep.test.js)
-- [test/havingStep.test.js](/C:/Users/משתמש/Desktop/‏‏‏‏sqlclaudereservebackup/test/havingStep.test.js)
-- [test/selectStep.test.js](/C:/Users/משתמש/Desktop/‏‏‏‏sqlclaudereservebackup/test/selectStep.test.js)
-- [test/windowStep.test.js](/C:/Users/משתמש/Desktop/‏‏‏‏sqlclaudereservebackup/test/windowStep.test.js)
-- [test/orderByStep.test.js](/C:/Users/משתמש/Desktop/‏‏‏‏sqlclaudereservebackup/test/orderByStep.test.js)
-- [test/limitStep.test.js](/C:/Users/משתמש/Desktop/‏‏‏‏sqlclaudereservebackup/test/limitStep.test.js)
-- [test/cteStep.test.js](/C:/Users/משתמש/Desktop/‏‏‏‏sqlclaudereservebackup/test/cteStep.test.js)
-- [test/subqueryStep.test.js](/C:/Users/משתמש/Desktop/‏‏‏‏sqlclaudereservebackup/test/subqueryStep.test.js)
+- [test/queryExtractor.test.js](/C:/Users/׳׳©׳×׳׳©/Desktop/ג€ג€ג€ג€sqlclaudereservebackup/test/queryExtractor.test.js)
+- [test/queryBlocks.test.js](/C:/Users/׳׳©׳×׳׳©/Desktop/ג€ג€ג€ג€sqlclaudereservebackup/test/queryBlocks.test.js)
+- [test/fromStep.test.js](/C:/Users/׳׳©׳×׳׳©/Desktop/ג€ג€ג€ג€sqlclaudereservebackup/test/fromStep.test.js)
+- [test/joinStep.test.js](/C:/Users/׳׳©׳×׳׳©/Desktop/ג€ג€ג€ג€sqlclaudereservebackup/test/joinStep.test.js)
+- [test/whereStep.test.js](/C:/Users/׳׳©׳×׳׳©/Desktop/ג€ג€ג€ג€sqlclaudereservebackup/test/whereStep.test.js)
+- [test/groupByStep.test.js](/C:/Users/׳׳©׳×׳׳©/Desktop/ג€ג€ג€ג€sqlclaudereservebackup/test/groupByStep.test.js)
+- [test/havingStep.test.js](/C:/Users/׳׳©׳×׳׳©/Desktop/ג€ג€ג€ג€sqlclaudereservebackup/test/havingStep.test.js)
+- [test/selectStep.test.js](/C:/Users/׳׳©׳×׳׳©/Desktop/ג€ג€ג€ג€sqlclaudereservebackup/test/selectStep.test.js)
+- [test/windowStep.test.js](/C:/Users/׳׳©׳×׳׳©/Desktop/ג€ג€ג€ג€sqlclaudereservebackup/test/windowStep.test.js)
+- [test/orderByStep.test.js](/C:/Users/׳׳©׳×׳׳©/Desktop/ג€ג€ג€ג€sqlclaudereservebackup/test/orderByStep.test.js)
+- [test/limitStep.test.js](/C:/Users/׳׳©׳×׳׳©/Desktop/ג€ג€ג€ג€sqlclaudereservebackup/test/limitStep.test.js)
+- [test/cteStep.test.js](/C:/Users/׳׳©׳×׳׳©/Desktop/ג€ג€ג€ג€sqlclaudereservebackup/test/cteStep.test.js)
+- [test/subqueryStep.test.js](/C:/Users/׳׳©׳×׳׳©/Desktop/ג€ג€ג€ג€sqlclaudereservebackup/test/subqueryStep.test.js)
 
 ## Engine Architecture
 
@@ -198,30 +198,30 @@ The SQL debugging engine was refactored so `src/engine/stepEngine.ts` is now the
 
 ### Module map
 
-- [src/engine/stepEngine.ts](/C:/Users/משתמש/Desktop/‏‏‏‏sqlclaudereservebackup/src/engine/stepEngine.ts)
+- [src/engine/stepEngine.ts](/C:/Users/׳׳©׳×׳׳©/Desktop/ג€ג€ג€ג€sqlclaudereservebackup/src/engine/stepEngine.ts)
   - top-level execution flow
   - per-block orchestration
   - row fetching helpers
   - temp-table materialization for CTE/subquery blocks
-- [src/engine/stepEngineTypes.ts](/C:/Users/משתמש/Desktop/‏‏‏‏sqlclaudereservebackup/src/engine/stepEngineTypes.ts)
+- [src/engine/stepEngineTypes.ts](/C:/Users/׳׳©׳×׳׳©/Desktop/ג€ג€ג€ג€sqlclaudereservebackup/src/engine/stepEngineTypes.ts)
   - shared engine types
   - `DebugStep` and all step metadata types
   - parsed-query helper types
-- [src/engine/stepEngineParsing.ts](/C:/Users/משתמש/Desktop/‏‏‏‏sqlclaudereservebackup/src/engine/stepEngineParsing.ts)
+- [src/engine/stepEngineParsing.ts](/C:/Users/׳׳©׳×׳׳©/Desktop/ג€ג€ג€ג€sqlclaudereservebackup/src/engine/stepEngineParsing.ts)
   - SQL clause parsing
   - canonical query builders
   - select-item splitting
   - window and CASE parsing helpers
   - shared SQL token/identifier utilities
-- [src/engine/stepEngineMetadata.ts](/C:/Users/משתמש/Desktop/‏‏‏‏sqlclaudereservebackup/src/engine/stepEngineMetadata.ts)
+- [src/engine/stepEngineMetadata.ts](/C:/Users/׳׳©׳×׳׳©/Desktop/ג€ג€ג€ג€sqlclaudereservebackup/src/engine/stepEngineMetadata.ts)
   - metadata detection/building for `WHERE`, `HAVING`, `GROUP BY`, `ORDER BY`, `SELECT`
   - subquery metadata builders
   - aggregate, CASE, and window metadata
-- [src/engine/stepEngineExplain.ts](/C:/Users/משתמש/Desktop/‏‏‏‏sqlclaudereservebackup/src/engine/stepEngineExplain.ts)
+- [src/engine/stepEngineExplain.ts](/C:/Users/׳׳©׳×׳׳©/Desktop/ג€ג€ג€ג€sqlclaudereservebackup/src/engine/stepEngineExplain.ts)
   - join display row construction
   - join relationship inference
   - window explanation text and preview-row helpers
-- [src/engine/stepEngineStepBuilders.ts](/C:/Users/משתמש/Desktop/‏‏‏‏sqlclaudereservebackup/src/engine/stepEngineStepBuilders.ts)
+- [src/engine/stepEngineStepBuilders.ts](/C:/Users/׳׳©׳×׳׳©/Desktop/ג€ג€ג€ג€sqlclaudereservebackup/src/engine/stepEngineStepBuilders.ts)
   - construction of `DebugStep` objects for each clause
   - block-context attachment
 

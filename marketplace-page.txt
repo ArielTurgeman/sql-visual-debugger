@@ -1,0 +1,107 @@
+SQL Visual Debugger
+
+SQL Visual Debugger is a VS Code extension for stepping through MySQL SELECT queries clause by clause and inspecting the intermediate result at each stage.
+
+Instead of treating SQL as a black box, the extension shows how rows change as the query moves through FROM, JOIN, WHERE, GROUP BY, HAVING, SELECT, ORDER BY, and LIMIT.
+
+Why Use It
+
+- Understand why rows were added, removed, grouped, sorted, or transformed
+- Debug row-count surprises and unexpected join results
+- Inspect intermediate tables instead of only the final output
+- Learn SQL execution flow visually inside VS Code
+
+Features
+
+- Debug the selected query or the query under the cursor
+- Show intermediate result tables for each supported clause
+- Highlight the active SQL clause in the editor as you move between steps
+- Explain what changed between one step and the next
+- Re-run the same query after switching databases
+- Keep the debugger panel open beside the editor for side-by-side inspection
+
+Supported SQL
+
+The extension currently supports MySQL-focused debugging for these query patterns:
+
+- SELECT
+- FROM
+- JOIN
+  - INNER JOIN
+  - LEFT JOIN
+  - RIGHT JOIN
+  - CROSS JOIN
+  - simple equality ON conditions
+- WHERE
+- GROUP BY
+- HAVING
+- ORDER BY
+- LIMIT
+- DISTINCT
+- non-recursive WITH CTEs
+- simple FROM (SELECT ...) alias subqueries
+- CASE expressions in SELECT
+- supported window functions in SELECT
+
+Visual Debugging Experience
+
+JOIN
+
+- Preview both sides of the join
+- Click join-key rows to trace matching records
+- Show relationship hints such as one-to-many or many-to-one
+- Preserve duplicate column names using qualified labels when needed
+
+WHERE and HAVING
+
+- Show which rows survived the filter
+- Show pre-filter rows for comparison
+- Highlight columns involved in the condition
+- Show extra context for supported subquery-based filters
+
+GROUP BY
+
+- Show grouped output rows
+- Inspect which source rows formed each group
+- Highlight grouping columns
+- Surface aggregate columns and summaries
+
+SELECT and ORDER BY
+
+- Show projected output columns
+- Explain DISTINCT behavior when used
+- Surface CASE expression details
+- Surface supported window-function details and previews
+- Highlight sort columns in ORDER BY
+
+How To Use
+
+1. Open a .sql file in VS Code.
+2. Select a query, or place the cursor inside a query.
+3. Right-click and choose SQL Debugger: Debug Query, or run the same command from the Command Palette.
+4. Enter your MySQL connection details when prompted.
+5. Step through the query in the debugger panel.
+
+Commands
+
+- SQL Debugger: Debug Query
+- SQL Debugger: Configure Connection
+- SQL Debugger: Switch Database
+
+MySQL Connection Behavior
+
+- The extension is currently focused on MySQL.
+- Server details and active database are stored separately.
+- Passwords are kept only in session memory and are not persisted as durable configuration.
+- The extension may create temporary tables while debugging supported CTE or subquery flows.
+
+Current Limitations
+
+- Only SELECT-style debugging flows are supported
+- Recursive CTEs are not supported
+- JOIN conditions must currently be simple equality comparisons
+- Not every subquery shape is supported
+- Some advanced window syntax is not yet supported
+- Support is currently focused on MySQL
+
+When a query is outside the supported shape, the extension should fail with a clear message instead of silently producing misleading output.

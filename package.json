@@ -1,9 +1,25 @@
 {
   "name": "sql-visual-debugger",
   "displayName": "SQL Visual Debugger",
-  "description": "Step through SELECT queries against your live MySQL database and see intermediate results at every clause.",
+  "description": "Visualize MySQL SELECT queries step by step and inspect intermediate results for each SQL clause.",
   "version": "0.1.0",
   "publisher": "sql-visual-debugger",
+  "categories": [
+    "Debuggers",
+    "Visualization"
+  ],
+  "keywords": [
+    "sql",
+    "mysql",
+    "debugger",
+    "query",
+    "database",
+    "visualizer",
+    "teaching",
+    "education",
+    "analysis",
+    "learning"
+  ],
   "engines": {
     "vscode": "^1.80.0"
   },
@@ -45,14 +61,7 @@
           "command": "sqlDebugger.changeConnection"
         }
       ]
-    },
-    "keybindings": [
-      {
-        "command": "sqlDebugger.debugQuery",
-        "key": "f5",
-        "when": "editorLangId == sql && editorFocus"
-      }
-    ]
+    }
   },
   "scripts": {
     "compile": "tsc -p ./",
