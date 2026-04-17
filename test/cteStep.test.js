@@ -35,9 +35,37 @@ function sqlIncludes(fragment) {
   };
 }
 
+function sqlEquals(fragment) {
+  const normalizedFragment = normalizeSql(fragment);
+  return {
+    match(sql) {
+      return normalizeSql(sql) === normalizedFragment;
+    },
+  };
+}
+
 module.exports = function runCteStepTests(runTest, assert) {
   runTest('non-recursive CTEs execute as a separate block and feed the main query', async () => {
     const runner = new FakeRunner([
+      {
+        ...sqlIncludes('with `active_users` as (select id, team_id from users where active = 1) select `active_users`.`id`, `active_users`.`team_id` from active_users where id > 15'),
+        rows: [
+          { id: 20, team_id: 20 },
+        ],
+      },
+      {
+        ...sqlIncludes('with `active_users` as (select id, team_id from users where active = 1) select id from active_users where id > 15'),
+        rows: [
+          { id: 20 },
+        ],
+      },
+      {
+        ...sqlIncludes('with `active_users` as (select id, team_id from users where active = 1) select `active_users`.* from active_users'),
+        rows: [
+          { id: 12, team_id: 10 },
+          { id: 20, team_id: 20 },
+        ],
+      },
       {
         ...sqlIncludes('select `users`.* from users'),
         rows: [
@@ -47,36 +75,17 @@ module.exports = function runCteStepTests(runTest, assert) {
         ],
       },
       {
-        ...sqlIncludes('select `users`.`id`, `users`.`team_id`, `users`.`active` from users where active = 1'),
+        ...sqlEquals('select `users`.`id`, `users`.`team_id`, `users`.`active` from users where active = 1'),
         rows: [
           { id: 12, team_id: 10, active: 1 },
           { id: 20, team_id: 20, active: 1 },
         ],
       },
       {
-        ...sqlIncludes('select id, team_id from users where active = 1'),
+        ...sqlEquals('select id, team_id from users where active = 1'),
         rows: [
           { id: 12, team_id: 10 },
           { id: 20, team_id: 20 },
-        ],
-      },
-      {
-        ...sqlIncludes('select `active_users`.* from active_users'),
-        rows: [
-          { id: 12, team_id: 10 },
-          { id: 20, team_id: 20 },
-        ],
-      },
-      {
-        ...sqlIncludes('select `active_users`.`id`, `active_users`.`team_id` from active_users where id > 15'),
-        rows: [
-          { id: 20, team_id: 20 },
-        ],
-      },
-      {
-        ...sqlIncludes('select id from active_users where id > 15'),
-        rows: [
-          { id: 20 },
         ],
       },
     ]);
@@ -139,8 +148,7 @@ module.exports = function runCteStepTests(runTest, assert) {
       { id: 20 },
     ]);
 
-    assert.ok(
-      runner.executes.some(sql => normalizeSql(sql).includes('create temporary table `active_users` as select id, team_id from users where active = 1')),
-    );
+    assert.deepEqual(runner.executes, []);
+    assert.equal(runner.queries.some(sql => /temporary\s+table/i.test(sql)), false);
   });
 };

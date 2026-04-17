@@ -27,6 +27,7 @@ Instead of treating SQL as a black box, the extension shows the intermediate res
 
 - Right-click a `.sql` file and run `SQL Debugger: Debug Query`
 - Use Command Palette commands to debug queries or manage connections
+- Preserve VS Code's default `F5` behavior instead of overriding it inside SQL files
 - Highlight the active clause in the source editor as you move through steps
 - Detect the active database from:
   - `USE database_name;`
@@ -38,6 +39,7 @@ Instead of treating SQL as a black box, the extension shows the intermediate res
 - Connect to a MySQL server from inside VS Code
 - Store server details and active database separately
 - Keep passwords only in session memory
+- Run the debugger using read-only `SELECT` / `WITH` execution only
 - Switch databases from the extension UI
 - Reconfigure server details without editing files
 
@@ -117,6 +119,7 @@ Current known limitations include:
 - recursive CTEs are not supported
 - JOIN conditions must currently be simple equality comparisons
 - not every subquery shape is supported
+- some query shapes may be rejected if they cannot be inlined safely in read-only mode
 - some advanced window syntax is not yet supported
 - support is currently focused on MySQL
 
@@ -161,6 +164,7 @@ Current automated coverage includes:
 - SQL sanitization and multi-statement rejection
 - query block parsing for main queries, non-recursive CTEs, and simple `FROM` subqueries
 - unsupported query-shape rejection such as recursive CTEs and non-equality joins
+- read-only CTE and subquery inlining behavior for supported flows
 - engine step execution for:
   - `FROM`
   - `JOIN`
@@ -174,7 +178,7 @@ Current automated coverage includes:
 - `CASE` explanation metadata
 - window-function metadata for ranking and aggregate window functions
 - `WHERE IN` and scalar-subquery metadata
-- dependency flow from CTE blocks and materialized `FROM` subquery blocks
+- dependency flow from CTE blocks and read-only inlined `FROM` subquery blocks
 
 Current test files:
 
@@ -202,7 +206,7 @@ The SQL debugging engine was refactored so `src/engine/stepEngine.ts` is now the
   - top-level execution flow
   - per-block orchestration
   - row fetching helpers
-  - temp-table materialization for CTE/subquery blocks
+  - read-only inlining for supported CTE/subquery blocks
 - [src/engine/stepEngineTypes.ts](/C:/Users/׳׳©׳×׳׳©/Desktop/ג€ג€ג€ג€sqlclaudereservebackup/src/engine/stepEngineTypes.ts)
   - shared engine types
   - `DebugStep` and all step metadata types
@@ -233,7 +237,7 @@ When changing the engine, use this routing guide:
 - Add or change derived metadata for UI panels in `stepEngineMetadata.ts`.
 - Add or change human-readable explanations, preview ordering, or join display shaping in `stepEngineExplain.ts`.
 - Add or change the shape/content of clause step objects in `stepEngineStepBuilders.ts`.
-- Add or change orchestration order, query execution flow, or temp-table lifecycle in `stepEngine.ts`.
+- Add or change orchestration order, query execution flow, or read-only block inlining in `stepEngine.ts`.
 - Add or change shared step/meta types in `stepEngineTypes.ts`.
 
 ### Practical examples
@@ -264,3 +268,9 @@ Launch the extension in VS Code using the provided Extension Host launch configu
 ## Project Status
 
 SQL Visual Debugger is an active product, not an MVP placeholder. The current focus is on expanding SQL coverage, improving resilience, refining the teaching experience, and hardening the extension for broader real-world usage.
+
+Recent hardening updates include:
+
+- removal of the SQL-only `F5` keybinding so the extension no longer overrides VS Code's standard debug shortcut
+- stronger Marketplace metadata in `package.json`, including clearer description, categories, and keywords
+- a read-only debugger execution model for supported flows, removing reliance on temporary table creation for CTE and supported subquery handling

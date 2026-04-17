@@ -35,9 +35,37 @@ function sqlIncludes(fragment) {
   };
 }
 
+function sqlEquals(fragment) {
+  const normalizedFragment = normalizeSql(fragment);
+  return {
+    match(sql) {
+      return normalizeSql(sql) === normalizedFragment;
+    },
+  };
+}
+
 module.exports = function runSubqueryStepTests(runTest, assert) {
   runTest('FROM subqueries execute as a separate subquery block and feed the main query', async () => {
     const runner = new FakeRunner([
+      {
+        ...sqlIncludes('select `sub`.`id`, `sub`.`team_id` from (select id, team_id from users where active = 1) sub where sub.id > 15'),
+        rows: [
+          { id: 20, team_id: 20 },
+        ],
+      },
+      {
+        ...sqlIncludes('select sub.id from (select id, team_id from users where active = 1) sub where sub.id > 15'),
+        rows: [
+          { id: 20 },
+        ],
+      },
+      {
+        ...sqlIncludes('select `sub`.* from (select id, team_id from users where active = 1) sub'),
+        rows: [
+          { id: 12, team_id: 10 },
+          { id: 20, team_id: 20 },
+        ],
+      },
       {
         ...sqlIncludes('select `users`.* from users'),
         rows: [
@@ -47,36 +75,17 @@ module.exports = function runSubqueryStepTests(runTest, assert) {
         ],
       },
       {
-        ...sqlIncludes('select `users`.`id`, `users`.`team_id`, `users`.`active` from users where active = 1'),
+        ...sqlEquals('select `users`.`id`, `users`.`team_id`, `users`.`active` from users where active = 1'),
         rows: [
           { id: 12, team_id: 10, active: 1 },
           { id: 20, team_id: 20, active: 1 },
         ],
       },
       {
-        ...sqlIncludes('select id, team_id from users where active = 1'),
+        ...sqlEquals('select id, team_id from users where active = 1'),
         rows: [
           { id: 12, team_id: 10 },
           { id: 20, team_id: 20 },
-        ],
-      },
-      {
-        ...sqlIncludes('select `sub`.* from `__sql_debug_subquery_1` sub'),
-        rows: [
-          { id: 12, team_id: 10 },
-          { id: 20, team_id: 20 },
-        ],
-      },
-      {
-        ...sqlIncludes('select `sub`.`id`, `sub`.`team_id` from `__sql_debug_subquery_1` sub where sub.id > 15'),
-        rows: [
-          { id: 20, team_id: 20 },
-        ],
-      },
-      {
-        ...sqlIncludes('select sub.id from `__sql_debug_subquery_1` sub where sub.id > 15'),
-        rows: [
-          { id: 20 },
         ],
       },
     ]);
@@ -138,8 +147,7 @@ module.exports = function runSubqueryStepTests(runTest, assert) {
       { id: 20 },
     ]);
 
-    assert.ok(
-      runner.executes.some(sql => normalizeSql(sql).includes('create temporary table `__sql_debug_subquery_1` as select id, team_id from users where active = 1')),
-    );
+    assert.deepEqual(runner.executes, []);
+    assert.equal(runner.queries.some(sql => /temporary\s+table/i.test(sql)), false);
   });
 };

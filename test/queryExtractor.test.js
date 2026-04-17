@@ -192,6 +192,45 @@ LIMIT 20;
     );
   });
 
+  runTest('extractQuery rejects unsafe SELECT write-like and locking modifiers', () => {
+    const cases = [
+      {
+        sql: "SELECT * INTO OUTFILE '/tmp/users.csv' FROM users",
+        pattern: /into outfile|select .* into .*not supported/i,
+      },
+      {
+        sql: "SELECT * INTO DUMPFILE '/tmp/users.bin' FROM users",
+        pattern: /into dumpfile|select .* into .*not supported/i,
+      },
+      {
+        sql: 'SELECT id INTO @debug_user_id FROM users LIMIT 1',
+        pattern: /select .* into .*not supported|variable assignment/i,
+      },
+      {
+        sql: 'SELECT * FROM users FOR UPDATE',
+        pattern: /FOR UPDATE/i,
+      },
+      {
+        sql: 'SELECT * FROM users LOCK IN SHARE MODE',
+        pattern: /LOCK IN SHARE MODE/i,
+      },
+      {
+        sql: "SELECT 'FOR UPDATE' AS example FROM users",
+        pattern: null,
+      },
+    ];
+
+    for (const testCase of cases) {
+      const result = extractQuery(createEditor(testCase.sql));
+      if (testCase.pattern === null) {
+        assert.ok(!('error' in result), `Expected query to be allowed: ${testCase.sql}`);
+      } else {
+        assert.ok('error' in result, `Expected query to be rejected: ${testCase.sql}`);
+        assert.match(result.error, testCase.pattern);
+      }
+    }
+  });
+
   runTest('sanitizeSql removes comments, collapses whitespace, and strips a trailing semicolon', () => {
     const sql = `
       /* dashboard query */

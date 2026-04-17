@@ -30,7 +30,7 @@ import {
   buildWindowPreviewRows,
 } from './stepEngineExplain';
 
-type RunCustomSelect = (runner: MysqlRunner, sql: string) => Promise<Record<string, unknown>[]>;
+type RunCustomSelect = (sql: string) => Promise<Record<string, unknown>[]>;
 type GetColumns = (rows: Record<string, unknown>[]) => string[];
 
 export function detectWhereColumns(whereClause: string, columns: string[]): string[] {
@@ -57,7 +57,7 @@ export async function buildWhereInSubqueryMeta(
     return undefined;
   }
 
-  const rows = await runCustomSelect(runner, parsed.subquerySql);
+  const rows = await runCustomSelect(parsed.subquerySql);
   return {
     explanation: `Filters rows by checking whether ${parsed.outerColumn ? bareIdentifier(parsed.outerColumn) : 'value'} exists in the values returned by the subquery.`,
     rows: rows.slice(0, MAX_DISPLAY_ROWS),
@@ -81,7 +81,7 @@ export async function buildWhereScalarSubqueryMeta(
     return undefined;
   }
 
-  const rows = await runCustomSelect(runner, parsed.subquerySql);
+  const rows = await runCustomSelect(parsed.subquerySql);
   if (rows.length !== 1) return undefined;
 
   const columns = getColumns(rows);
@@ -250,7 +250,7 @@ export async function detectCaseColumns(
     currentFromSql,
     usesDistinct,
   );
-  const helperRows = (await runCustomSelect(runner, helperSql)).slice(0, MAX_DISPLAY_ROWS);
+  const helperRows = (await runCustomSelect(helperSql)).slice(0, MAX_DISPLAY_ROWS);
 
   return parsedCases.map((meta, caseIndex) => ({
     outputColumn: meta.outputColumn,

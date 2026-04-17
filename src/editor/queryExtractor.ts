@@ -62,6 +62,11 @@ export function extractQuery(editor: vscode.TextEditor): ExtractResult {
         };
     }
 
+    const unsafeReason = findUnsafeReadOnlyShape(sql);
+    if (unsafeReason) {
+        return { error: unsafeReason };
+    }
+
     return { sql, source, rawText: raw, selectionStart };
 }
 
@@ -289,4 +294,75 @@ export function sanitizeSql(raw: string): string {
     }
 
     return withoutTrailing.replace(/\s+/g, ' ').trim();
+}
+
+function findUnsafeReadOnlyShape(sql: string): string | null {
+    const masked = maskQuotedContent(sql);
+
+    if (/\bINTO\b/i.test(masked)) {
+        return (
+            'SQL Debugger only runs strictly read-only SELECT/WITH queries.\n' +
+            '`SELECT ... INTO ...` is not supported, including `INTO OUTFILE`, `INTO DUMPFILE`, and variable assignment forms.'
+        );
+    }
+
+    if (/\bFOR\s+UPDATE\b/i.test(masked)) {
+        return (
+            'SQL Debugger only runs strictly read-only SELECT/WITH queries.\n' +
+            '`FOR UPDATE` is not supported because it requests row locks.'
+        );
+    }
+
+    if (/\bLOCK\s+IN\s+SHARE\s+MODE\b/i.test(masked)) {
+        return (
+            'SQL Debugger only runs strictly read-only SELECT/WITH queries.\n' +
+            '`LOCK IN SHARE MODE` is not supported because it requests row locks.'
+        );
+    }
+
+    return null;
+}
+
+function maskQuotedContent(sql: string): string {
+    let result = '';
+    let i = 0;
+    let quote: '\'' | '"' | '`' | null = null;
+
+    while (i < sql.length) {
+        const char = sql[i];
+        const next = sql[i + 1];
+
+        if (!quote && (char === '\'' || char === '"' || char === '`')) {
+            quote = char;
+            result += ' ';
+            i += 1;
+            continue;
+        }
+
+        if (quote) {
+            if (char === quote) {
+                if ((quote === '\'' || quote === '"') && next === quote) {
+                    result += '  ';
+                    i += 2;
+                    continue;
+                }
+
+                let backslashCount = 0;
+                for (let j = i - 1; j >= 0 && sql[j] === '\\'; j -= 1) {
+                    backslashCount += 1;
+                }
+                if (backslashCount % 2 === 0) {
+                    quote = null;
+                }
+            }
+            result += ' ';
+            i += 1;
+            continue;
+        }
+
+        result += char;
+        i += 1;
+    }
+
+    return result;
 }

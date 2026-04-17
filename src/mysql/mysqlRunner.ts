@@ -3,6 +3,8 @@ const mysql = require('mysql2/promise') as typeof import('mysql2/promise');
 
 import type { ConnectionConfig, Row } from '../types';
 
+export const MYSQL_DEBUG_QUERY_TIMEOUT_MS = 10_000;
+
 export class MysqlRunner {
     private connection: import('mysql2/promise').Connection | null = null;
 
@@ -19,19 +21,25 @@ export class MysqlRunner {
             bigNumberStrings: true,
         });
 
-        // CTE debugging materializes intermediate blocks into temporary tables.
-        // That internal implementation detail is rejected by MySQL when the
-        // session is forced into READ ONLY mode, so safety is enforced at the
-        // application layer instead: queryExtractor only accepts SELECT / WITH
-        // queries, and recursive CTEs are rejected before execution.
+        // The debugger only issues read-only SELECT/WITH statements. Query
+        // safety is still enforced at the application layer: queryExtractor
+        // accepts only SELECT / WITH queries, and recursive CTEs are rejected
+        // before execution.
     }
 
     async query(sql: string): Promise<Row[]> {
         if (!this.connection) {
             throw new Error('Not connected to database. Call connect() first.');
         }
-        const [rows] = await this.connection.execute(sql);
-        return rows as Row[];
+        try {
+            const [rows] = await this.connection.execute({
+                sql,
+                timeout: MYSQL_DEBUG_QUERY_TIMEOUT_MS,
+            });
+            return rows as Row[];
+        } catch (error) {
+            throw normalizeMysqlQueryError(error);
+        }
     }
 
     async execute(sql: string): Promise<void> {
@@ -51,4 +59,19 @@ export class MysqlRunner {
     isConnected(): boolean {
         return this.connection !== null;
     }
+}
+
+function normalizeMysqlQueryError(error: unknown): Error {
+    if (error instanceof Error) {
+        const mysqlError = error as Error & { code?: string; errno?: number };
+        if (mysqlError.code === 'PROTOCOL_SEQUENCE_TIMEOUT' || /timeout/i.test(mysqlError.message)) {
+            return new Error(
+                `SQL Debugger timed out after ${Math.round(MYSQL_DEBUG_QUERY_TIMEOUT_MS / 1000)} seconds.\n` +
+                'Try narrowing the query with WHERE or LIMIT and run it again.'
+            );
+        }
+        return mysqlError;
+    }
+
+    return new Error(String(error));
 }
