@@ -185,4 +185,40 @@ module.exports = function runWebviewPanelTests(runTest, assert) {
     assert.match(panel.webview.html, /meta\.previewRows/);
     assert.doesNotMatch(panel.webview.html, /const previewRows = \(step\.data \|\| \[\]\)\.map/);
   });
+
+  runTest('joined ORDER BY columns keep sort highlight classes in the rendered table logic', () => {
+    const { sendResult } = loadPanelModule();
+    const panel = { webview: { html: '' } };
+    sendResult(
+      panel,
+      'SELECT p.name, tp.made, tp.attempted FROM playerinfo p RIGHT JOIN threes tp ON p.PlayerId = tp.PlayerId ORDER BY tp.attempted DESC, tp.made DESC',
+      'orderby-join.sql',
+      'demo@localhost',
+      [
+        {
+          name: 'ORDER BY',
+          title: 'ORDER BY',
+          explanation: 'test',
+          sqlFragment: 'ORDER BY tp.attempted DESC, tp.made DESC',
+          rowsBefore: 2,
+          rowsAfter: 2,
+          data: [
+            { PlayerName: 'A', Made: 2.4, Attempted: 8.6 },
+            { PlayerName: 'B', Made: 2.0, Attempted: 7.2 },
+          ],
+          columns: ['PlayerName', 'Made', 'Attempted'],
+          schemaContext: { joinIndicatorColumns: ['Made', 'Attempted'] },
+          sortColumns: ['Made', 'Attempted'],
+        },
+      ],
+      'demo',
+      ['demo'],
+    );
+
+    assert.match(panel.webview.html, /isSort \? 'sortColHead' : ''/);
+    assert.match(panel.webview.html, /!isDupe && isJoined \? 'joinedColHead' : ''/);
+    assert.match(panel.webview.html, /isSort \? 'sortColCell' : ''/);
+    assert.match(panel.webview.html, /!isDupe && isJoined \? 'joinedColCell' : ''/);
+    assert.doesNotMatch(panel.webview.html, /const cls = isDupe\s+\? 'joinedColHead dupeHead'[\s\S]*?: isSort\s+\? 'sortColHead'/);
+  });
 };

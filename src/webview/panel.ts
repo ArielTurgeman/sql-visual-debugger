@@ -964,14 +964,13 @@ function renderApp(input: { sql: string; source: string; connectionLabel: string
                       : isJoined ? '<span class="joinedBadge">joined</span>'
                       : isAgg    ? \`<span class="aggBadge">\${escapeHtml(aggColMap.get(c))}</span>\`
                       : '';
-          // Header class priority: dupe > joined > groupBy > sort.
-          // join-key columns carry no background tint — the header badge is the only indicator.
-          const cls = isDupe    ? 'joinedColHead dupeHead'
-                    : isJoined  ? 'joinedColHead'
-                    : isWindow  ? 'windowColHead windowSelectableHead'
-                    : isGroupBy ? 'groupByColHead'
-                    : isSort    ? 'sortColHead'
-                    : '';
+          const cls = [
+            isDupe ? 'joinedColHead dupeHead' : '',
+            !isDupe && isJoined ? 'joinedColHead' : '',
+            isWindow ? 'windowColHead windowSelectableHead' : '',
+            isGroupBy ? 'groupByColHead' : '',
+            isSort ? 'sortColHead' : '',
+          ].filter(Boolean).join(' ');
           return isWindow
             ? \`<th class="\${cls} windowHeaderCell" data-window-column="\${escapeAttr(c)}">\${escapeHtml(c)}\${badge}</th>\`
             : \`<th class="\${cls}">\${escapeHtml(c)}\${badge}</th>\`;
@@ -986,13 +985,12 @@ function renderApp(input: { sql: string; source: string; connectionLabel: string
             const isSort    = sortColSet.has(col);
             const isGroupBy = groupByColSet.has(col);
             const isCase    = step.name === 'SELECT' && caseColSet.has(col);
-            // Agg columns: badge only in header — cells stay default to keep table scannable.
-            // join-key columns: no cell tint in the intermediate result table.
-            const cls = isDupe    ? 'dupeColCell'
-                      : isJoined  ? 'joinedColCell'
-                      : isGroupBy ? 'groupByColCell'
-                      : isSort    ? 'sortColCell'
-                      : '';
+            const cls = [
+              isDupe ? 'dupeColCell' : '',
+              !isDupe && isJoined ? 'joinedColCell' : '',
+              isGroupBy ? 'groupByColCell' : '',
+              isSort ? 'sortColCell' : '',
+            ].filter(Boolean).join(' ');
             return isCase
               ? \`<td class="\${cls} caseCell \${activeCaseCell && activeCaseCell.column === col && activeCaseCell.rowIndex === rowIdx ? 'activeCaseCell' : ''}" data-case-column="\${escapeAttr(col)}" data-case-row="\${rowIdx}">\${renderCellValue(row[col])}</td>\`
               : \`<td class="\${cls}\${isGroupByStep && isGroupBy ? ' groupByClickableCell' : ''}">\${renderCellValue(row[col])}</td>\`;

@@ -76,6 +76,7 @@ The extension currently supports debugging these query patterns:
 - `DISTINCT`
 - non-recursive `WITH` CTEs
 - simple subqueries in `FROM (...) alias`
+- simple uncorrelated aggregate scalar subqueries in the `SELECT` list
 - `CASE` expressions in `SELECT`
 - supported window functions in `SELECT`
 
@@ -108,6 +109,7 @@ The extension currently supports debugging these query patterns:
 - Explain `DISTINCT` behavior when used
 - Surface CASE expression details
 - Surface window-function details and previews
+- Allow supported simple scalar subqueries in projected columns even when they do not yet have dedicated explanation UI
 
 ### ORDER BY
 
@@ -124,6 +126,7 @@ Current known limitations include:
 - recursive CTEs are not supported
 - JOIN conditions must currently be simple equality comparisons
 - not every subquery shape is supported
+- projected scalar subqueries are currently limited to simple uncorrelated single-value aggregate forms such as `AVG`, `SUM`, `COUNT`, `MIN`, and `MAX`
 - some query shapes may be rejected if they cannot be inlined safely in read-only mode
 - some advanced window syntax is not yet supported
 - support is currently focused on MySQL
@@ -184,6 +187,7 @@ Current automated coverage includes:
 - `CASE` explanation metadata
 - window-function metadata for ranking and aggregate window functions
 - `WHERE IN` and scalar-subquery metadata
+- extractor support for simple uncorrelated aggregate scalar subqueries in the `SELECT` list
 - dependency flow from CTE blocks and read-only inlined `FROM` subquery blocks
 
 Current test files:

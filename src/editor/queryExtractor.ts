@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 import type { ExtractResult } from '../types';
 import { parseQueryBlocks } from '../engine/queryBlocks';
-import { parseSelectQuery } from '../engine/stepEngineParsing';
+import { extractTableAliases, parseSelectQuery, splitTopLevelSelectItems } from '../engine/stepEngineParsing';
 
 type StatementSlice = {
     start: number;
@@ -450,11 +450,9 @@ function findUnsupportedReadOnlyShape(sql: string): string | null {
         );
     }
 
-    if (hasScalarSubqueryInProjectedColumns(sql)) {
-        return (
-            'SQL Debugger does not support scalar subqueries in the SELECT list yet.\n' +
-            'Subqueries inside projected columns are currently outside the supported query shapes.'
-        );
+    const projectedScalarReason = findUnsupportedProjectedScalarSubqueryReason(sql);
+    if (projectedScalarReason) {
+        return projectedScalarReason;
     }
 
     const unsupportedWindowReason = findUnsupportedWindowFunctionReason(masked);
@@ -540,17 +538,166 @@ function findMalformedShapeReason(sql: string): string | null {
     }
 }
 
-function hasScalarSubqueryInProjectedColumns(sql: string): boolean {
+function findUnsupportedProjectedScalarSubqueryReason(sql: string): string | null {
     try {
         const blocks = parseQueryBlocks(sql);
-        return blocks.some(block => {
+        for (const block of blocks) {
             const parsed = parseSelectQuery(block.sql);
-            return /\(\s*SELECT\b/i.test(parsed.selectClause);
-        });
+            const currentFromSql = [parsed.fromClause, ...parsed.joins.map(join => join.rawClause)].join(' ');
+            const outerAliases = extractTableAliases(currentFromSql);
+            const selectItems = splitTopLevelSelectItems(parsed.selectClause.replace(/^SELECT\s+/i, ''));
+
+            for (const item of selectItems) {
+                const subqueries = extractProjectedScalarSubqueries(item);
+                for (const subquerySql of subqueries) {
+                    const unsupportedReason = getUnsupportedProjectedScalarSubqueryReason(subquerySql, outerAliases);
+                    if (unsupportedReason) {
+                        return unsupportedReason;
+                    }
+                }
+            }
+        }
+        return null;
     } catch {
         // Let the normal malformed-shape path surface parser failures.
-        return false;
+        return null;
     }
+}
+
+function extractProjectedScalarSubqueries(item: string): string[] {
+    const subqueries: string[] = [];
+    let i = 0;
+
+    while (i < item.length) {
+        const char = item[i];
+        if (char === '\'' || char === '"' || char === '`') {
+            i = skipQuotedSqlLike(item, i, char);
+            continue;
+        }
+        if (char !== '(') {
+            i += 1;
+            continue;
+        }
+
+        const innerStart = skipWhitespace(item, i + 1);
+        if (!/^SELECT\b/i.test(item.slice(innerStart))) {
+            i += 1;
+            continue;
+        }
+
+        const closeIndex = findMatchingParenInText(item, i);
+        const innerSql = item.slice(innerStart, closeIndex).trim();
+        subqueries.push(innerSql);
+        i = closeIndex + 1;
+    }
+
+    return subqueries;
+}
+
+function getUnsupportedProjectedScalarSubqueryReason(subquerySql: string, outerAliases: string[]): string | null {
+    if (isCorrelatedProjectedSubquery(subquerySql, outerAliases)) {
+        return (
+            'SQL Debugger supports only simple uncorrelated scalar subqueries in the SELECT list right now.\n' +
+            'Correlated projected subqueries are still outside the supported query shapes.'
+        );
+    }
+
+    let parsed;
+    try {
+        parsed = parseSelectQuery(subquerySql);
+    } catch {
+        return (
+            'SQL Debugger supports only simple scalar subqueries in the SELECT list right now.\n' +
+            'This projected subquery shape is currently outside the supported query shapes.'
+        );
+    }
+
+    if (parsed.joins.length > 0 || parsed.groupByClause || parsed.havingClause || parsed.orderByClause || parsed.limitClause) {
+        return (
+            'SQL Debugger supports only simple scalar subqueries in the SELECT list right now.\n' +
+            'Projected subqueries with JOIN, GROUP BY, HAVING, ORDER BY, or LIMIT are currently outside the supported query shapes.'
+        );
+    }
+
+    const selectItems = splitTopLevelSelectItems(parsed.selectClause.replace(/^SELECT\s+/i, ''));
+    if (selectItems.length !== 1) {
+        return (
+            'SQL Debugger supports only single-value scalar subqueries in the SELECT list right now.\n' +
+            'Projected subqueries must return exactly one selected value.'
+        );
+    }
+
+    const selectExpr = selectItems[0]
+        .replace(/\s+AS\s+`?[A-Za-z_][A-Za-z0-9_]*`?\s*$/i, '')
+        .trim();
+
+    if (!/^(AVG|SUM|COUNT|MIN|MAX)\s*\(/i.test(selectExpr)) {
+        return (
+            'SQL Debugger supports only simple aggregate scalar subqueries in the SELECT list right now.\n' +
+            'Use a single AVG, SUM, COUNT, MIN, or MAX expression in the projected subquery.'
+        );
+    }
+
+    return null;
+}
+
+function isCorrelatedProjectedSubquery(subquerySql: string, outerAliases: string[]): boolean {
+    return outerAliases.some(alias => {
+        const escaped = alias.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        return new RegExp(`(?:\\b|\\\`)${escaped}(?:\\\`)?\\.`, 'i').test(subquerySql);
+    });
+}
+
+function skipWhitespace(text: string, index: number): number {
+    let cursor = index;
+    while (cursor < text.length && /\s/.test(text[cursor])) {
+        cursor += 1;
+    }
+    return cursor;
+}
+
+function findMatchingParenInText(text: string, openIndex: number): number {
+    let depth = 0;
+    let i = openIndex;
+
+    while (i < text.length) {
+        const char = text[i];
+        if (char === '\'' || char === '"' || char === '`') {
+            i = skipQuotedSqlLike(text, i, char);
+            continue;
+        }
+        if (char === '(') {
+            depth += 1;
+        } else if (char === ')') {
+            depth -= 1;
+            if (depth === 0) {
+                return i;
+            }
+        }
+        i += 1;
+    }
+
+    throw new Error('Unbalanced parentheses while parsing projected scalar subquery.');
+}
+
+function skipQuotedSqlLike(text: string, start: number, quote: string): number {
+    let i = start + 1;
+    while (i < text.length) {
+        if (text[i] === '\\') {
+            i += 2;
+            continue;
+        }
+        if (text[i] === quote) {
+            if ((quote === '\'' || quote === '"') && text[i + 1] === quote) {
+                i += 2;
+                continue;
+            }
+            return i + 1;
+        }
+        i += 1;
+    }
+
+    throw new Error('Unterminated quoted string while parsing projected scalar subquery.');
 }
 
 function isSimpleEqualityJoin(onClause: string): boolean {

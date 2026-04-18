@@ -203,6 +203,66 @@ LIMIT 20;
     assert.match(result.error, /scalar subqueries in the SELECT list/i);
   });
 
+  runTest('extractQuery allows a simple uncorrelated aggregate scalar subquery in the SELECT list', () => {
+    const sql = `
+      SELECT
+          p.PlayerId,
+          p.PlayerName,
+          (
+              SELECT
+                  AVG(Age)
+              FROM playerinfo
+          ) AS league_avg_age
+      FROM playerinfo p
+      ORDER BY p.PlayerName
+      LIMIT 20;
+    `;
+
+    const result = extractQuery(createEditor(sql));
+
+    assert.ok(!('error' in result));
+    assert.equal(
+      result.sql,
+      'SELECT p.PlayerId, p.PlayerName, ( SELECT AVG(Age) FROM playerinfo ) AS league_avg_age FROM playerinfo p ORDER BY p.PlayerName LIMIT 20',
+    );
+  });
+
+  runTest('extractQuery still rejects correlated scalar subqueries in the SELECT list', () => {
+    const sql = `
+      SELECT
+        p.PlayerId,
+        (
+          SELECT AVG(Age)
+          FROM playerinfo
+          WHERE TeamId = p.TeamId
+        ) AS team_avg_age
+      FROM playerinfo p;
+    `;
+
+    const result = extractQuery(createEditor(sql));
+
+    assert.ok('error' in result);
+    assert.match(result.error, /uncorrelated scalar subqueries|Correlated projected subqueries/i);
+  });
+
+  runTest('extractQuery still rejects grouped scalar subqueries in the SELECT list', () => {
+    const sql = `
+      SELECT
+        p.PlayerId,
+        (
+          SELECT AVG(Age)
+          FROM playerinfo
+          GROUP BY TeamId
+        ) AS grouped_avg_age
+      FROM playerinfo p;
+    `;
+
+    const result = extractQuery(createEditor(sql));
+
+    assert.ok('error' in result);
+    assert.match(result.error, /JOIN, GROUP BY, HAVING, ORDER BY, or LIMIT/i);
+  });
+
   runTest('extractQuery allows a simple FROM subquery block when the projected columns are plain', () => {
     const sql = `
       SELECT
