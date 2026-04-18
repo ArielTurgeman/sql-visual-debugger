@@ -106,6 +106,20 @@ WHERE total > 100;
     assert.equal(result.source, 'orders.sql');
   });
 
+  runTest('extractQuery rejects an extra trailing semicolon even in cursor-based extraction mode', () => {
+    const text = 'SELECT * FROM playerinfo;;';
+    const cursorOffset = text.indexOf('playerinfo');
+    const editor = createEditor(text, { cursorOffset, fileName: 'players.sql' });
+
+    const result = extractQuery(editor);
+
+    assert.deepEqual(result, {
+      error:
+        'Only a single SQL statement is supported per debug run.\n' +
+        'Remove the extra semicolon or select just one query.',
+    });
+  });
+
   runTest('extractQuery reports a helpful error when the cursor is between queries with no active statement', () => {
     const text = `
 SELECT * FROM users;

@@ -88,6 +88,14 @@ function getQueryUnderCursor(
 ): { raw: string; selectionStart: vscode.Position; source: string } | { error: string } {
     const fullText = editor.document.getText();
     const cursorOffset = editor.document.offsetAt(editor.selection.active);
+    if (hasConsecutiveSemicolonTerminators(fullText)) {
+        return {
+            error:
+                'Only a single SQL statement is supported per debug run.\n' +
+                'Remove the extra semicolon or select just one query.'
+        };
+    }
+
     const statements = splitStatements(fullText);
     const nonEmptyStatements = statements.filter(statement => statement.trimmedText.length > 0);
 
@@ -276,6 +284,14 @@ function splitStatements(text: string): StatementSlice[] {
             trimmedText,
         };
     });
+}
+
+function hasConsecutiveSemicolonTerminators(text: string): boolean {
+    const withoutComments = text
+        .replace(/\/\*[\s\S]*?\*\//g, ' ')
+        .replace(/--[^\n]*/g, '');
+    const masked = maskQuotedContent(withoutComments);
+    return /;\s*;/.test(masked);
 }
 
 /**
