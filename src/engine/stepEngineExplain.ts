@@ -54,24 +54,9 @@ export function buildWindowPreviewColumns(
 
 export function buildWindowPreviewRows(
   meta: Omit<WindowColumnMeta, 'explanation' | 'howComputed' | 'previewColumns' | 'previewRows'>,
-  inputRows: Record<string, unknown>[],
-  selectedRows: Record<string, unknown>[],
+  previewRows: Record<string, unknown>[],
 ): Record<string, unknown>[] {
-  const previewColumns = buildWindowPreviewColumns(meta);
-  const limitedInput = inputRows.slice(0, 20);
-  const limitedSelected = selectedRows.slice(0, 20);
-
-  const previewRows = limitedInput.map((row, index) => {
-    const preview: Record<string, unknown> = {};
-    for (const col of previewColumns) {
-      preview[col] = col === meta.outputColumn
-        ? limitedSelected[index]?.[meta.outputColumn]
-        : readRowValue(row, col);
-    }
-    return preview;
-  });
-
-  return previewRows.sort((left, right) => comparePreviewRows(left, right, meta));
+  return [...previewRows].sort((left, right) => comparePreviewRows(left, right, meta));
 }
 
 export function buildJoinDisplay(

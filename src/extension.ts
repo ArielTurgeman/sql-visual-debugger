@@ -1,6 +1,8 @@
 import * as vscode from 'vscode';
+import { detectDatabaseNameInSql } from './editor/databaseDetection';
 import { extractQuery } from './editor/queryExtractor';
 import { computeStepRanges } from './editor/rangeMapper';
+import { assertLocalOnlyServer, getLocalOnlyHostError } from './mysql/localHostPolicy';
 import { MysqlRunner } from './mysql/mysqlRunner';
 import { executeDebugSteps } from './engine/stepEngine';
 import { getOrCreatePanel, sendLoading, sendResult, sendError } from './webview/panel';
@@ -184,7 +186,7 @@ async function runDebugger(context: vscode.ExtensionContext): Promise<void> {
     //     annotation comment, or a safe API probe of any installed SQL extension).
     //     If detected and different from the stored DB, auto-switch before running
     //     so the debugger stays in sync when the user changes DB in their SQL client.
-    const detectedDb = await detectDatabaseFromEditor(editor);
+    const detectedDb = await detectDatabaseFromContext(rawText, editor);
     if (detectedDb) {
         await addKnownDatabase(context, detectedDb);
         if (detectedDb !== getActiveDatabase(context)) {
@@ -226,6 +228,13 @@ async function executeDebugSession(
             sendError(panel, 'Connection setup cancelled. Run the debugger again to configure MySQL.');
             return;
         }
+    }
+    try {
+        assertLocalOnlyServer(server);
+    } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        sendError(panel, message);
+        return;
     }
 
     // Ensure there is an active database
@@ -277,6 +286,9 @@ async function executeDebugSession(
             getKnownDatabases(context),
         );
     } catch (err) {
+        if (shouldForgetCachedPassword(err)) {
+            cachedPassword = undefined;
+        }
         const message = err instanceof Error ? err.message : String(err);
         sendError(panel, message, getKnownDatabases(context), activeDb);
     } finally {
@@ -422,9 +434,10 @@ async function promptForServer(
 ): Promise<ServerConnection | null> {
     const host = await vscode.window.showInputBox({
         title: 'SQL Debugger — MySQL Server (1/3)',
-        prompt: 'Host',
+        prompt: 'Host (local only in v1)',
         value: defaults?.host ?? 'localhost',
         ignoreFocusOut: true,
+        validateInput: value => getLocalOnlyHostError(value.trim()),
     });
     if (host === undefined) { return null; }
 
@@ -450,6 +463,7 @@ async function promptForServer(
         port: parseInt(portStr, 10) || 3306,
         user: user.trim() || 'root',
     };
+    assertLocalOnlyServer(server);
 
     // Persist only non-sensitive server details.
     await context.globalState.update(KEY_SERVER, server);
@@ -492,8 +506,13 @@ async function promptForPassword(username?: string): Promise<string | null> {
  *  3. Safe API probe of any installed SQL extension
  *     — probes are wrapped in try/catch so a missing API shape is silently skipped
  */
-async function detectDatabaseFromEditor(editor: vscode.TextEditor): Promise<string | undefined> {
-    const content = editor.document.getText();
+async function detectDatabaseFromContext(
+    sqlText: string,
+    editor: vscode.TextEditor,
+): Promise<string | undefined> {
+    const detectedInSql = detectDatabaseNameInSql(sqlText);
+    if (detectedInSql) { return detectedInSql; }
+    const content = '';
 
     // 1. Standard SQL USE statement — e.g.  USE world;  or  USE `world`;
     const useMatch = content.match(/\bUSE\s+`?(\w+)`?\s*;/i);
@@ -529,6 +548,15 @@ async function detectDatabaseFromEditor(editor: vscode.TextEditor): Promise<stri
     }
 
     return undefined;
+}
+
+function shouldForgetCachedPassword(error: unknown): boolean {
+    if (!(error instanceof Error)) {
+        return false;
+    }
+
+    const mysqlError = error as Error & { code?: string };
+    return mysqlError.code === 'ER_ACCESS_DENIED_ERROR' || /access denied/i.test(mysqlError.message);
 }
 
 /**

@@ -34,4 +34,49 @@ module.exports = function runMysqlRunnerTests(runTest, assert) {
       /timed out after/i,
     );
   });
+
+  runTest('MysqlRunner rejects non-read-only SQL before execution', async () => {
+    const runner = new MysqlRunner();
+    let executed = false;
+    runner.connection = {
+      async execute() {
+        executed = true;
+        return [[]];
+      },
+    };
+
+    await assert.rejects(
+      () => runner.query('DELETE FROM users'),
+      /only runs read-only select\/with statements/i,
+    );
+    assert.equal(executed, false);
+  });
+
+  runTest('MysqlRunner disables the generic execute API', async () => {
+    const runner = new MysqlRunner();
+
+    await assert.rejects(
+      () => runner.execute('DROP TABLE users'),
+      /unsafe execution api disabled/i,
+    );
+  });
+
+  runTest('MysqlRunner rolls back the read-only session before disconnecting', async () => {
+    const runner = new MysqlRunner();
+    const calls = [];
+    runner.connection = {
+      async query(sql) {
+        calls.push(sql);
+        return [];
+      },
+      async end() {
+        calls.push('END');
+      },
+    };
+
+    await runner.disconnect();
+
+    assert.deepEqual(calls, ['ROLLBACK', 'END']);
+    assert.equal(runner.isConnected(), false);
+  });
 };

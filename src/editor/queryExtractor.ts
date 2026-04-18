@@ -1,5 +1,7 @@
 import * as vscode from 'vscode';
 import type { ExtractResult } from '../types';
+import { parseQueryBlocks } from '../engine/queryBlocks';
+import { parseSelectQuery } from '../engine/stepEngineParsing';
 
 type StatementSlice = {
     start: number;
@@ -65,6 +67,16 @@ export function extractQuery(editor: vscode.TextEditor): ExtractResult {
     const unsafeReason = findUnsafeReadOnlyShape(sql);
     if (unsafeReason) {
         return { error: unsafeReason };
+    }
+
+    const unsupportedReason = findUnsupportedReadOnlyShape(sql);
+    if (unsupportedReason) {
+        return { error: unsupportedReason };
+    }
+
+    const malformedReason = findMalformedShapeReason(sql);
+    if (malformedReason) {
+        return { error: malformedReason };
     }
 
     return { sql, source, rawText: raw, selectionStart };
@@ -320,7 +332,215 @@ function findUnsafeReadOnlyShape(sql: string): string | null {
         );
     }
 
+    if (/\bINTERSECT\b/i.test(masked)) {
+        return (
+            'SQL Debugger does not support `INTERSECT` yet.\n' +
+            '`INTERSECT` is currently outside the supported query shapes.'
+        );
+    }
+
+    if (/\bEXCEPT\b/i.test(masked)) {
+        return (
+            'SQL Debugger does not support `EXCEPT` yet.\n' +
+            '`EXCEPT` is currently outside the supported query shapes.'
+        );
+    }
+
+    if (/\bNATURAL\s+JOIN\b/i.test(masked)) {
+        return (
+            'SQL Debugger does not support `NATURAL JOIN` yet.\n' +
+            '`NATURAL JOIN` is currently outside the supported query shapes.'
+        );
+    }
+
+    if (/\bFULL\s+OUTER\s+JOIN\b/i.test(masked)) {
+        return (
+            'SQL Debugger does not support `FULL OUTER JOIN` yet.\n' +
+            '`FULL OUTER JOIN` is currently outside the supported query shapes.'
+        );
+    }
+
+    if (/\bOVER\s+[A-Za-z_][A-Za-z0-9_]*\b/i.test(masked)) {
+        return (
+            'SQL Debugger does not support named windows yet.\n' +
+            'Only inline `OVER (...)` window definitions are currently supported.'
+        );
+    }
+
+    if (/\bOVER\s*\([^)]*\b(?:ROWS|RANGE)\b/i.test(masked)) {
+        return (
+            'SQL Debugger does not support window frame clauses yet.\n' +
+            '`ROWS ...` and `RANGE ...` window frames are currently outside the supported query shapes.'
+        );
+    }
+
+    const unsupportedJoinReason = findUnsupportedJoinReason(masked);
+    if (unsupportedJoinReason) {
+        return unsupportedJoinReason;
+    }
+
     return null;
+}
+
+function findUnsupportedReadOnlyShape(sql: string): string | null {
+    const masked = maskQuotedContent(sql);
+
+    if (/\bUNION(?:\s+ALL)?\b/i.test(masked)) {
+        return (
+            'SQL Debugger does not support `UNION` or `UNION ALL` yet.\n' +
+            'Set-operation queries are currently outside the supported query shapes.'
+        );
+    }
+
+    if (/\bJOIN\s+[\w`\.]+\s+USING\s*\(/i.test(masked)) {
+        return (
+            'SQL Debugger does not support `JOIN ... USING (...)` yet.\n' +
+            'Use an explicit `JOIN ... ON left_col = right_col` query shape instead.'
+        );
+    }
+
+    if (/\bCROSS\s+JOIN\b/i.test(masked)) {
+        return (
+            'SQL Debugger does not support `CROSS JOIN` yet.\n' +
+            '`CROSS JOIN` is currently outside the supported query shapes.'
+        );
+    }
+
+    if (/\b(?:NOT\s+)?EXISTS\s*\(/i.test(masked)) {
+        return (
+            'SQL Debugger does not support `EXISTS` / `NOT EXISTS` subqueries yet.\n' +
+            'These subquery predicates are currently outside the supported query shapes.'
+        );
+    }
+
+    if (/^\s*SELECT\s+DATABASE\s*\(\s*\)\s*$/i.test(masked)) {
+        return (
+            'SQL Debugger does not support `SELECT DATABASE()` yet.\n' +
+            'Function-only queries are currently outside the supported query shapes.'
+        );
+    }
+
+    if (/\bWITH\s+ROLLUP\b/i.test(masked)) {
+        return (
+            'SQL Debugger does not support `WITH ROLLUP` yet.\n' +
+            '`WITH ROLLUP` is currently outside the supported query shapes.'
+        );
+    }
+
+    if (/\bJOIN\s*\(\s*SELECT\b/i.test(masked)) {
+        return (
+            'SQL Debugger does not support joins against derived tables yet.\n' +
+            'Only direct table joins are currently supported.'
+        );
+    }
+
+    if (hasScalarSubqueryInProjectedColumns(sql)) {
+        return (
+            'SQL Debugger does not support scalar subqueries in the SELECT list yet.\n' +
+            'Subqueries inside projected columns are currently outside the supported query shapes.'
+        );
+    }
+
+    const unsupportedWindowReason = findUnsupportedWindowFunctionReason(masked);
+    if (unsupportedWindowReason) {
+        return unsupportedWindowReason;
+    }
+
+    return null;
+}
+
+function findUnsupportedWindowFunctionReason(sql: string): string | null {
+    const allowed = new Set([
+        'ROW_NUMBER',
+        'RANK',
+        'DENSE_RANK',
+        'AVG',
+        'SUM',
+        'COUNT',
+        'MAX',
+        'MIN',
+    ]);
+    const windowFnPattern = /\b([A-Za-z_][A-Za-z0-9_]*)\s*\([^)]*\)\s*OVER\s*\(/gi;
+    let match: RegExpExecArray | null;
+
+    while ((match = windowFnPattern.exec(sql)) !== null) {
+        const functionName = match[1].toUpperCase();
+        if (!allowed.has(functionName)) {
+            return (
+                `SQL Debugger does not support \`${functionName}\` window functions yet.\n` +
+                'Only ROW_NUMBER, RANK, DENSE_RANK, AVG, SUM, COUNT, MAX, and MIN window functions are currently supported.'
+            );
+        }
+    }
+
+    return null;
+}
+
+function findUnsupportedJoinReason(sql: string): string | null {
+    const joinOnPattern =
+        /\b(?:INNER|LEFT|RIGHT|FULL(?:\s+OUTER)?|CROSS)?\s*JOIN\b[\s\S]+?\bON\b\s+([\s\S]+?)(?=\b(?:INNER|LEFT|RIGHT|FULL(?:\s+OUTER)?|CROSS|NATURAL)\s+JOIN\b|\bWHERE\b|\bGROUP\s+BY\b|\bHAVING\b|\bORDER\s+BY\b|\bLIMIT\b|\bUNION\b|\bINTERSECT\b|\bEXCEPT\b|$)/gi;
+    let match: RegExpExecArray | null;
+
+    while ((match = joinOnPattern.exec(sql)) !== null) {
+        const onClause = match[1].trim();
+        if (!isSimpleEqualityJoin(onClause)) {
+            return (
+                'SQL Debugger supports only simple equality JOIN conditions right now.\n' +
+                'Complex JOIN predicates, multi-condition JOINs, and function-based JOINs are currently rejected.'
+            );
+        }
+    }
+
+    return null;
+}
+
+function findMalformedShapeReason(sql: string): string | null {
+    if (/^\s*WITH\b/i.test(sql)) {
+        return null;
+    }
+
+    try {
+        const parsed = parseSelectQuery(sql);
+        const selectBody = parsed.selectClause.replace(/^SELECT\b/i, '').trim();
+        if (!selectBody) {
+            return (
+                'SQL Debugger could not understand this query shape.\n' +
+                'The SELECT list is empty.'
+            );
+        }
+        if (/,\s*$/.test(selectBody)) {
+            return (
+                'SQL Debugger could not understand this query shape.\n' +
+                'The SELECT list ends with a trailing comma.'
+            );
+        }
+        return null;
+    } catch (error) {
+        const message = error instanceof Error ? error.message : 'Unsupported or malformed SQL.';
+        return (
+            'SQL Debugger could not understand this query shape.\n' +
+            `${message}`
+        );
+    }
+}
+
+function hasScalarSubqueryInProjectedColumns(sql: string): boolean {
+    try {
+        const blocks = parseQueryBlocks(sql);
+        return blocks.some(block => {
+            const parsed = parseSelectQuery(block.sql);
+            return /\(\s*SELECT\b/i.test(parsed.selectClause);
+        });
+    } catch {
+        // Let the normal malformed-shape path surface parser failures.
+        return false;
+    }
+}
+
+function isSimpleEqualityJoin(onClause: string): boolean {
+    const identifier = '(?:`[^`]+`|[A-Za-z_][A-Za-z0-9_$]*)(?:\\.(?:`[^`]+`|[A-Za-z_][A-Za-z0-9_$]*))?';
+    const simpleEquality = new RegExp(`^${identifier}\\s*=\\s*${identifier}$`, 'i');
+    return simpleEquality.test(onClause);
 }
 
 function maskQuotedContent(sql: string): string {

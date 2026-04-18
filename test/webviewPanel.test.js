@@ -137,4 +137,52 @@ module.exports = function runWebviewPanelTests(runTest, assert) {
     assert.match(panel.webview.html, /"blockName":"active_users"/);
     assert.match(panel.webview.html, /"name":"WHERE"/);
   });
+
+  runTest('window detail rendering uses engine-provided preview rows instead of rebuilding from final step data only', () => {
+    const { sendResult } = loadPanelModule();
+    const panel = { webview: { html: '' } };
+    sendResult(
+      panel,
+      'SELECT PlayerId, ROW_NUMBER() OVER (PARTITION BY TeamId ORDER BY Age DESC) AS rn FROM playerinfo',
+      'window.sql',
+      'demo@localhost',
+      [
+        {
+          name: 'SELECT',
+          title: 'SELECT',
+          explanation: 'test',
+          sqlFragment: 'SELECT PlayerId, ROW_NUMBER() OVER (PARTITION BY TeamId ORDER BY Age DESC) AS rn',
+          rowsBefore: 2,
+          rowsAfter: 2,
+          data: [
+            { PlayerId: 69, rn: 1 },
+            { PlayerId: 74, rn: 2 },
+          ],
+          columns: ['PlayerId', 'rn'],
+          windowColumns: [
+            {
+              outputColumn: 'rn',
+              expression: 'ROW_NUMBER() OVER (PARTITION BY TeamId ORDER BY Age DESC) AS rn',
+              functionName: 'ROW_NUMBER',
+              partitionBy: ['TeamId'],
+              orderBy: ['Age DESC'],
+              orderByTerms: [{ column: 'Age', direction: 'DESC' }],
+              explanation: 'test',
+              howComputed: ['test'],
+              previewColumns: ['TeamId', 'Age', 'rn'],
+              previewRows: [
+                { TeamId: 10, Age: 33, rn: 1 },
+                { TeamId: 10, Age: 31, rn: 2 },
+              ],
+            },
+          ],
+        },
+      ],
+      'demo',
+      ['demo'],
+    );
+
+    assert.match(panel.webview.html, /meta\.previewRows/);
+    assert.doesNotMatch(panel.webview.html, /const previewRows = \(step\.data \|\| \[\]\)\.map/);
+  });
 };

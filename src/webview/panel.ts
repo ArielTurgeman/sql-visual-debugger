@@ -637,7 +637,7 @@ function renderApp(input: { sql: string; source: string; connectionLabel: string
           meta.orderByTerms.length > 0 ? \`Order by: \${orderMeta}\` : null
         ].filter(Boolean).join(' • ');
 
-        const previewRows = (step.data || []).map(row => {
+        const previewRows = ((meta.previewRows || []).length > 0 ? meta.previewRows : (step.data || [])).map(row => {
           const preview = {};
           previewColumns.forEach(col => {
             preview[col] = row[col];

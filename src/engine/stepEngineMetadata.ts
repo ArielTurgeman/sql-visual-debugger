@@ -191,12 +191,12 @@ export function buildAggSummary(selectClause: string): string {
   return found.join(', ');
 }
 
-export function detectWindowColumns(
+export async function detectWindowColumns(
   selectClause: string,
   resultColumns: string[],
-  inputRows: Record<string, unknown>[],
-  selectedRows: Record<string, unknown>[],
-): WindowColumnMeta[] {
+  parsedQuery: ParsedQuery,
+  runCustomSelect: RunCustomSelect,
+): Promise<WindowColumnMeta[]> {
   const items = splitTopLevelSelectItems(selectClause.replace(/^SELECT\s+/i, ''));
   const windows: WindowColumnMeta[] = [];
 
@@ -206,12 +206,13 @@ export function detectWindowColumns(
     if (!parsed) {
       throw new Error(`Unsupported window function expression: ${item}`);
     }
+    const previewRows = await runCustomSelect(buildWindowPreviewQuery(parsed, parsedQuery));
     windows.push({
       ...parsed,
       explanation: buildWindowExplanation(parsed),
       howComputed: buildWindowHowComputed(parsed),
       previewColumns: buildWindowPreviewColumns(parsed),
-      previewRows: buildWindowPreviewRows(parsed, inputRows, selectedRows),
+      previewRows: buildWindowPreviewRows(parsed, previewRows),
     });
   }
 
@@ -441,4 +442,33 @@ function buildCaseHelperSelectParts(meta: ParsedCaseExpression, caseIndex: numbe
     `${ref.expr} AS \`__sql_debug_case_${caseIndex}_input_${inputIndex}\``,
   );
   return [branchExpr, ...inputExprs];
+}
+
+function buildWindowPreviewQuery(
+  meta: Omit<WindowColumnMeta, 'explanation' | 'howComputed' | 'previewColumns' | 'previewRows'>,
+  parsedQuery: ParsedQuery,
+): string {
+  const selectParts = buildWindowPreviewColumns(meta).map(column => {
+    if (column === meta.outputColumn) {
+      return `${meta.expression}`;
+    }
+    return column;
+  });
+
+  const orderTerms = [
+    ...meta.partitionBy,
+    ...(meta.orderByTerms ?? []).map(term => `${term.column} ${term.direction}`),
+  ];
+
+  const baseSql = buildFinalQuery(
+    {
+      ...parsedQuery,
+      selectClause: `SELECT ${selectParts.join(', ')}`,
+      orderByClause: undefined,
+      limitClause: undefined,
+    },
+    { upTo: 'SELECT' },
+  );
+
+  return `${baseSql}${orderTerms.length > 0 ? ` ORDER BY ${orderTerms.join(', ')}` : ''}`;
 }

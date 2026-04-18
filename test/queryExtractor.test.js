@@ -175,7 +175,7 @@ LIMIT 20;
     }
   });
 
-  runTest('extractQuery allows subqueries inside SELECT expressions', () => {
+  runTest('extractQuery rejects scalar subqueries inside SELECT expressions', () => {
     const sql = `
       SELECT
         u.id,
@@ -185,10 +185,29 @@ LIMIT 20;
 
     const result = extractQuery(createEditor(sql));
 
+    assert.ok('error' in result);
+    assert.match(result.error, /scalar subqueries in the SELECT list/i);
+  });
+
+  runTest('extractQuery allows a simple FROM subquery block when the projected columns are plain', () => {
+    const sql = `
+      SELECT
+          *
+      FROM (
+          SELECT
+              PlayerId,
+              TeamId
+          FROM playerinfo
+      ) sub
+      WHERE sub.PlayerId > 10;
+    `;
+
+    const result = extractQuery(createEditor(sql));
+
     assert.ok(!('error' in result));
     assert.equal(
       result.sql,
-      'SELECT u.id, (SELECT COUNT(*) FROM orders o WHERE o.user_id = u.id) AS order_count FROM users u',
+      'SELECT * FROM ( SELECT PlayerId, TeamId FROM playerinfo ) sub WHERE sub.PlayerId > 10',
     );
   });
 
@@ -228,6 +247,127 @@ LIMIT 20;
         assert.ok('error' in result, `Expected query to be rejected: ${testCase.sql}`);
         assert.match(result.error, testCase.pattern);
       }
+    }
+  });
+
+  runTest('extractQuery rejects policy-blocked query shapes explicitly', () => {
+    const cases = [
+      {
+        sql: 'SELECT id FROM users INTERSECT SELECT id FROM admins',
+        pattern: /INTERSECT/i,
+      },
+      {
+        sql: 'SELECT id FROM users EXCEPT SELECT id FROM admins',
+        pattern: /EXCEPT/i,
+      },
+      {
+        sql: 'SELECT * FROM users NATURAL JOIN teams',
+        pattern: /NATURAL JOIN/i,
+      },
+      {
+        sql: 'SELECT * FROM users FULL OUTER JOIN teams ON users.team_id = teams.id',
+        pattern: /FULL OUTER JOIN/i,
+      },
+      {
+        sql: 'SELECT * FROM users u JOIN teams t ON u.team_id = t.id AND u.active = t.active',
+        pattern: /simple equality JOIN conditions/i,
+      },
+      {
+        sql: 'SELECT * FROM users u JOIN teams t ON LOWER(u.email) = LOWER(t.email)',
+        pattern: /simple equality JOIN conditions/i,
+      },
+      {
+        sql: 'SELECT id, SUM(score) OVER (ORDER BY score ROWS BETWEEN 1 PRECEDING AND CURRENT ROW) AS rolling_score FROM results',
+        pattern: /window frame clauses/i,
+      },
+      {
+        sql: 'SELECT id, SUM(score) OVER win FROM results WINDOW win AS (PARTITION BY team_id ORDER BY score)',
+        pattern: /named windows/i,
+      },
+    ];
+
+    for (const testCase of cases) {
+      const result = extractQuery(createEditor(testCase.sql));
+      assert.ok('error' in result, `Expected query to be rejected: ${testCase.sql}`);
+      assert.match(result.error, testCase.pattern);
+    }
+  });
+
+  runTest('extractQuery rejects read-only query shapes the debugger cannot visualize reliably yet', () => {
+    const cases = [
+      {
+        sql: 'SELECT id FROM users UNION SELECT id FROM admins',
+        pattern: /UNION|set-operation/i,
+      },
+      {
+        sql: 'SELECT id FROM users UNION ALL SELECT id FROM admins',
+        pattern: /UNION|set-operation/i,
+      },
+      {
+        sql: 'SELECT * FROM users u WHERE EXISTS (SELECT 1 FROM orders o WHERE o.user_id = u.id)',
+        pattern: /EXISTS/i,
+      },
+      {
+        sql: 'SELECT * FROM users u WHERE NOT EXISTS (SELECT 1 FROM orders o WHERE o.user_id = u.id)',
+        pattern: /NOT EXISTS|EXISTS/i,
+      },
+      {
+        sql: 'SELECT * FROM users JOIN teams USING (team_id)',
+        pattern: /USING/i,
+      },
+      {
+        sql: 'SELECT * FROM users CROSS JOIN teams',
+        pattern: /CROSS JOIN/i,
+      },
+      {
+        sql: 'SELECT * FROM users u JOIN (SELECT id FROM teams) t ON u.team_id = t.id',
+        pattern: /derived tables/i,
+      },
+      {
+        sql: 'SELECT id, LAG(score) OVER (ORDER BY score) AS prev_score FROM results',
+        pattern: /LAG|window functions/i,
+      },
+      {
+        sql: 'SELECT id, NTILE(4) OVER (ORDER BY score) AS quartile FROM results',
+        pattern: /NTILE|window functions/i,
+      },
+      {
+        sql: 'SELECT DATABASE()',
+        pattern: /DATABASE\(\)|Function-only queries/i,
+      },
+      {
+        sql: 'SELECT team_id, COUNT(*) FROM users GROUP BY team_id WITH ROLLUP',
+        pattern: /WITH ROLLUP/i,
+      },
+    ];
+
+    for (const testCase of cases) {
+      const result = extractQuery(createEditor(testCase.sql));
+      assert.ok('error' in result, `Expected query to be rejected: ${testCase.sql}`);
+      assert.match(result.error, testCase.pattern);
+    }
+  });
+
+  runTest('extractQuery rejects malformed select shapes before opening the debugger', () => {
+    const cases = [
+      {
+        sql: 'SELECT FROM users',
+        pattern: /could not understand|FROM clause/i,
+      },
+      {
+        sql: 'SELECT id, FROM users',
+        pattern: /could not understand|Unsupported or malformed SQL|FROM clause/i,
+      },
+      {
+        sql: 'SELECT * FROM users LEFT JOIN teams',
+        pattern: /could not understand|JOIN without ON/i,
+      },
+    ];
+
+    for (const testCase of cases) {
+      const result = extractQuery(createEditor(testCase.sql));
+      assert.ok('error' in result, `Expected malformed query to be rejected: ${testCase.sql}`);
+      assert.match(result.error, testCase.pattern);
     }
   });
 

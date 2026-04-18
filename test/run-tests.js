@@ -1,6 +1,8 @@
 const assert = require('node:assert/strict');
 
 const suites = [
+  require('./localHostPolicy.test'),
+  require('./databaseDetection.test'),
   require('./queryExtractor.test'),
   require('./queryBlocks.test'),
   require('./mysqlRunner.test'),

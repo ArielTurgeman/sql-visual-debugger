@@ -43,6 +43,33 @@ module.exports = function runWindowStepTests(runTest, assert) {
         ],
       },
       {
+        ...sqlIncludes('select team_id, score, row_number() over (partition by team_id order by score desc) as row_num from scores order by team_id, score desc'),
+        rows: [
+          { team_id: 10, score: 95, row_num: 1 },
+          { team_id: 10, score: 95, row_num: 2 },
+          { team_id: 10, score: 80, row_num: 3 },
+          { team_id: 20, score: 88, row_num: 1 },
+        ],
+      },
+      {
+        ...sqlIncludes('select team_id, score, rank() over (partition by team_id order by score desc) as rank_num from scores order by team_id, score desc'),
+        rows: [
+          { team_id: 10, score: 95, rank_num: 1 },
+          { team_id: 10, score: 95, rank_num: 1 },
+          { team_id: 10, score: 80, rank_num: 3 },
+          { team_id: 20, score: 88, rank_num: 1 },
+        ],
+      },
+      {
+        ...sqlIncludes('select team_id, score, dense_rank() over (partition by team_id order by score desc) as dense_rank_num from scores order by team_id, score desc'),
+        rows: [
+          { team_id: 10, score: 95, dense_rank_num: 1 },
+          { team_id: 10, score: 95, dense_rank_num: 1 },
+          { team_id: 10, score: 80, dense_rank_num: 2 },
+          { team_id: 20, score: 88, dense_rank_num: 1 },
+        ],
+      },
+      {
         ...sqlIncludes('row_number() over (partition by team_id order by score desc) as row_num'),
         rows: [
           { player: 'Ada', row_num: 1, rank_num: 1, dense_rank_num: 1 },
@@ -98,6 +125,19 @@ module.exports = function runWindowStepTests(runTest, assert) {
       ],
     );
     assert.ok(selectStep.windowColumns.every(col => col.previewRows.length > 0));
+    assert.deepEqual(
+      selectStep.windowColumns[0].previewRows.map(row => ({
+        team_id: row.team_id,
+        score: row.score,
+        row_num: row.row_num,
+      })),
+      [
+        { team_id: 10, score: 95, row_num: 1 },
+        { team_id: 10, score: 95, row_num: 2 },
+        { team_id: 10, score: 80, row_num: 3 },
+        { team_id: 20, score: 88, row_num: 1 },
+      ],
+    );
   });
 
   runTest('aggregate window functions expose metadata for SUM AVG COUNT MIN and MAX', async () => {
@@ -108,6 +148,46 @@ module.exports = function runWindowStepTests(runTest, assert) {
           { player: 'Ada', team_id: 10, score: 95 },
           { player: 'Linus', team_id: 10, score: 80 },
           { player: 'Grace', team_id: 20, score: 88 },
+        ],
+      },
+      {
+        ...sqlIncludes('select team_id, score, sum(score) over (partition by team_id order by score desc) as running_sum from scores order by team_id, score desc'),
+        rows: [
+          { team_id: 10, score: 95, running_sum: 95 },
+          { team_id: 10, score: 80, running_sum: 175 },
+          { team_id: 20, score: 88, running_sum: 88 },
+        ],
+      },
+      {
+        ...sqlIncludes('select team_id, score, avg(score) over (partition by team_id order by score desc) as running_avg from scores order by team_id, score desc'),
+        rows: [
+          { team_id: 10, score: 95, running_avg: 95 },
+          { team_id: 10, score: 80, running_avg: 87.5 },
+          { team_id: 20, score: 88, running_avg: 88 },
+        ],
+      },
+      {
+        ...sqlIncludes('select team_id, score, count(score) over (partition by team_id order by score desc) as running_count from scores order by team_id, score desc'),
+        rows: [
+          { team_id: 10, score: 95, running_count: 1 },
+          { team_id: 10, score: 80, running_count: 2 },
+          { team_id: 20, score: 88, running_count: 1 },
+        ],
+      },
+      {
+        ...sqlIncludes('select team_id, score, min(score) over (partition by team_id order by score desc) as running_min from scores order by team_id, score desc'),
+        rows: [
+          { team_id: 10, score: 95, running_min: 95 },
+          { team_id: 10, score: 80, running_min: 80 },
+          { team_id: 20, score: 88, running_min: 88 },
+        ],
+      },
+      {
+        ...sqlIncludes('select team_id, score, max(score) over (partition by team_id order by score desc) as running_max from scores order by team_id, score desc'),
+        rows: [
+          { team_id: 10, score: 95, running_max: 95 },
+          { team_id: 10, score: 80, running_max: 95 },
+          { team_id: 20, score: 88, running_max: 88 },
         ],
       },
       {
@@ -204,6 +284,58 @@ module.exports = function runWindowStepTests(runTest, assert) {
           orderByTerms: [{ column: 'score', direction: 'DESC' }],
         },
       ],
+    );
+  });
+
+  runTest('window previews keep the full row set instead of truncating to the first 20 rows', async () => {
+    const baseRows = Array.from({ length: 25 }, (_, index) => ({
+      player: `P${index + 1}`,
+      team_id: index < 13 ? 10 : 20,
+      score: 100 - index,
+    }));
+    const selectedRows = baseRows.map((row, index) => ({
+      player: row.player,
+      row_num: index < 13 ? index + 1 : index - 12,
+    }));
+
+    const runner = new FakeRunner([
+      {
+        ...sqlIncludes('select `scores`.* from scores'),
+        rows: baseRows,
+      },
+      {
+        ...sqlIncludes('select team_id, score, row_number() over (partition by team_id order by score desc) as row_num from scores order by team_id, score desc'),
+        rows: baseRows
+          .map((row, index) => ({
+            team_id: row.team_id,
+            score: row.score,
+            row_num: index < 13 ? index + 1 : index - 12,
+          }))
+          .sort((left, right) => left.team_id - right.team_id || right.score - left.score),
+      },
+      {
+        ...sqlIncludes('row_number() over (partition by team_id order by score desc) as row_num'),
+        rows: selectedRows,
+      },
+    ]);
+
+    const steps = await executeDebugSteps(
+      `
+      SELECT
+        player,
+        ROW_NUMBER() OVER (PARTITION BY team_id ORDER BY score DESC) AS row_num
+      FROM scores
+      `,
+      runner,
+    );
+
+    const selectStep = steps.find(step => step.name === 'SELECT');
+    if (!selectStep) throw new Error('Expected a SELECT step but none was produced.');
+
+    assert.equal(selectStep.windowColumns[0].previewRows.length, 25);
+    assert.deepEqual(
+      selectStep.windowColumns[0].previewRows.at(-1),
+      { team_id: 20, score: 76, row_num: 12 },
     );
   });
 };

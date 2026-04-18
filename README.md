@@ -40,6 +40,11 @@ Instead of treating SQL as a black box, the extension shows the intermediate res
 - Store server details and active database separately
 - Keep passwords only in session memory
 - Run the debugger using read-only `SELECT` / `WITH` execution only
+- Enforce read-only execution in the MySQL runner itself, not only in the SQL extractor
+- Start a read-only database transaction for debugger sessions and roll it back on disconnect
+- Forget cached passwords after access-denied failures so the next retry prompts again
+- Detect `USE database_name;` and `-- @db: ...` only from the exact SQL being debugged, not from unrelated text elsewhere in the file
+- Allow only local MySQL connections in v1 (`localhost`, `127.0.0.1`, or `::1`)
 - Switch databases from the extension UI
 - Reconfigure server details without editing files
 
@@ -122,6 +127,7 @@ Current known limitations include:
 - some query shapes may be rejected if they cannot be inlined safely in read-only mode
 - some advanced window syntax is not yet supported
 - support is currently focused on MySQL
+- v1 supports local MySQL connections only and blocks remote hosts
 
 When a query is outside the supported shape, the extension should fail with a clear message instead of silently giving misleading output.
 
@@ -274,3 +280,26 @@ Recent hardening updates include:
 - removal of the SQL-only `F5` keybinding so the extension no longer overrides VS Code's standard debug shortcut
 - stronger Marketplace metadata in `package.json`, including clearer description, categories, and keywords
 - a read-only debugger execution model for supported flows, removing reliance on temporary table creation for CTE and supported subquery handling
+- runner-level read-only safety checks so non-read-only SQL is blocked before execution even if a future code path bypasses the extractor
+- disabling the generic MySQL `execute()` path in the debugger runner so it cannot become an accidental write-capable escape hatch
+- starting read-only MySQL sessions and rolling them back when the debugger disconnects
+- clearing cached passwords after access-denied failures so users are re-prompted instead of silently retrying a bad password
+- narrowing automatic database detection to the exact SQL being debugged so unrelated `USE ...;` statements elsewhere in the file do not silently switch the target database
+- enforcing a local-only MySQL policy in v1 by blocking non-`localhost` hosts at configuration and execution time
+
+## Remaining Pre-Launch Work
+
+The core product is already useful. The current goal is not to keep adding features by default, but to finish the work around the product so the first public release is safe, clear, and stable.
+
+Current remaining work:
+
+- product boundaries
+- safety and trust review
+- release readiness
+- first-run onboarding check
+- error messages and empty states review
+- VSIX packaging and install test
+- publish metadata and assets
+- marketplace page
+- launch checklist
+- post-launch feedback plan

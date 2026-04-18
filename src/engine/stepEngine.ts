@@ -306,7 +306,7 @@ async function executeSingleQueryBlockSteps(
     selectedRows,
     columns: selectedColumns,
     schemaContext,
-    windowColumns: detectWindowColumns(parsed.selectClause, selectedColumns, currentRows, selectedRows),
+    windowColumns: await detectWindowColumns(parsed.selectClause, selectedColumns, parsed, runBlockSelect),
     caseColumns,
     preSelectRows: currentRows.slice(0, MAX_DISPLAY_ROWS),
     preSelectColumns: getColumns(currentRows),
