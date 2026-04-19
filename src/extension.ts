@@ -435,8 +435,9 @@ async function promptForServer(
     const host = await vscode.window.showInputBox({
         title: 'SQL Debugger — MySQL Server (1/3)',
         prompt: 'Host (local only in v1)',
-        value: defaults?.host ?? 'localhost',
+        value: defaults?.host ?? '',
         ignoreFocusOut: true,
+        placeHolder: 'Example: localhost',
         validateInput: value => getLocalOnlyHostError(value.trim()),
     });
     if (host === undefined) { return null; }
@@ -444,8 +445,9 @@ async function promptForServer(
     const portStr = await vscode.window.showInputBox({
         title: 'SQL Debugger — MySQL Server (2/3)',
         prompt: 'Port',
-        value: String(defaults?.port ?? 3306),
+        value: defaults?.port !== undefined ? String(defaults.port) : '',
         ignoreFocusOut: true,
+        placeHolder: 'Example: 3306',
         validateInput: v => (/^\d+$/.test(v) ? null : 'Enter a valid port number'),
     });
     if (portStr === undefined) { return null; }
@@ -453,15 +455,16 @@ async function promptForServer(
     const user = await vscode.window.showInputBox({
         title: 'SQL Debugger — MySQL Server (3/3)',
         prompt: 'Username',
-        value: defaults?.user ?? 'root',
+        value: defaults?.user ?? '',
         ignoreFocusOut: true,
+        placeHolder: 'Example: root',
     });
     if (user === undefined) { return null; }
 
     const server: ServerConnection = {
-        host: host.trim() || 'localhost',
-        port: parseInt(portStr, 10) || 3306,
-        user: user.trim() || 'root',
+        host: host.trim(),
+        port: parseInt(portStr, 10),
+        user: user.trim(),
     };
     assertLocalOnlyServer(server);
 
