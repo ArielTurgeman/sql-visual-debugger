@@ -390,7 +390,7 @@ function findUnsafeReadOnlyShape(sql: string): string | null {
         );
     }
 
-    const unsupportedJoinReason = findUnsupportedJoinReason(masked);
+    const unsupportedJoinReason = findUnsupportedJoinReason(sql);
     if (unsupportedJoinReason) {
         return unsupportedJoinReason;
     }

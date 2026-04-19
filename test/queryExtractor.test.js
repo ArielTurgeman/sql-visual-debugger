@@ -285,6 +285,18 @@ LIMIT 20;
     );
   });
 
+  runTest('extractQuery allows simple qualified equality joins with and without backticks', () => {
+    const cases = [
+      'SELECT * FROM playerinfo JOIN teaminfo ON teaminfo.TeamId = playerinfo.TeamId',
+      'SELECT * FROM playerinfo JOIN teaminfo ON teaminfo.`TeamId` = playerinfo.`TeamId`',
+    ];
+
+    for (const sql of cases) {
+      const result = extractQuery(createEditor(sql));
+      assert.ok(!('error' in result), `Expected query to be allowed: ${sql}`);
+    }
+  });
+
   runTest('extractQuery rejects unsafe SELECT write-like and locking modifiers', () => {
     const cases = [
       {

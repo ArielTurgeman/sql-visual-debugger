@@ -196,12 +196,7 @@ function renderApp(input: { sql: string; source: string; connectionLabel: string
 
       function renderBlockSummary(step) {
         if (!hasNestedQueryContext()) {
-          return \`
-          <div class="blockSummary">
-            <span class="blockBadge mainBadge">\${escapeHtml('Main Query')}</span>
-            <span class="blockName">\${escapeHtml('MAIN QUERY')}</span>
-          </div>
-          <div class="groupedFlowShell">\${renderFlowBlocks()}</div>\`;
+          return \`<div class="groupedFlowShell">\${renderFlowBlocks()}</div>\`;
         }
 
         const deps = Array.isArray(step.blockDependencies) && step.blockDependencies.length > 0
@@ -220,10 +215,11 @@ function renderApp(input: { sql: string; source: string; connectionLabel: string
         const groups = getBlockGroups();
         const activeStep = state.steps[currentStepIndex];
         const activeKey = \`\${activeStep.blockType}:\${activeStep.blockName}\`;
+        const showGroupLabels = hasNestedQueryContext();
 
         return groups.map(group => \`
           <div class="flowBlock \${group.key === activeKey ? 'activeBlock' : ''}">
-            <div class="flowBlockLabel">\${escapeHtml(group.blockType === 'cte' ? \`CTE \${group.cteNumber}: \${group.blockName}\` : group.blockType === 'subquery' ? \`SUBQUERY \${group.subqueryNumber}: \${group.blockName}\` : 'MAIN QUERY')}</div>
+            \${showGroupLabels ? \`<div class="flowBlockLabel">\${escapeHtml(group.blockType === 'cte' ? \`CTE \${group.cteNumber}: \${group.blockName}\` : group.blockType === 'subquery' ? \`SUBQUERY \${group.subqueryNumber}: \${group.blockName}\` : 'MAIN QUERY')}</div>\` : ''}
             <div class="flowBlockNodes">
               \${group.steps.map(({ step, idx }) => \`<button type="button" class="flowNode flowNodeBtn \${idx === currentStepIndex ? "active" : ""}" data-step-index="\${idx}">\${escapeHtml(step.name)}</button>\`).join(\`<span class="arrow">ג†’</span>\`)}
             </div>
@@ -271,7 +267,7 @@ function renderApp(input: { sql: string; source: string; connectionLabel: string
             <div class="stats statsBelow">
               <div class="stat"><label>\${step.sourceRows !== undefined ? 'Source rows' : 'Rows before'}</label><strong>\${formatNumber(step.sourceRows !== undefined ? step.sourceRows : step.rowsBefore)}</strong></div>
               <div class="stat"><label>Rows after</label><strong>\${formatNumber(step.rowsAfter)}</strong></div>
-              <div class="stat"><label>Row Δ</label><strong class="\${rowDelta > 0 ? 'deltaPos' : rowDelta < 0 ? 'deltaNeg' : 'deltaZero'}">\${formatSigned(rowDelta)}</strong></div>
+              <div class="stat"><label>Row change</label><strong class="\${rowDelta > 0 ? 'deltaPos' : rowDelta < 0 ? 'deltaNeg' : 'deltaZero'}">\${formatSigned(rowDelta)}</strong></div>
             </div>
             \${step.sourceLabel ? \`<div class="sourceNote">\${escapeHtml(step.sourceLabel)}</div>\` : ''}
             \${step.whereInSubquery ? renderWhereInSubqueryPreview(step.whereInSubquery) : ''}
@@ -303,6 +299,7 @@ function renderApp(input: { sql: string; source: string; connectionLabel: string
         bindCaseDetails(step);
         bindDistinctPanel(step);
         bindFlowClicks();
+        autoScrollRelevantColumns(step);
 
         // Notify the extension host which step is now active so it can apply
         // the corresponding editor decoration.  Sent after every render(),
@@ -366,10 +363,10 @@ function renderApp(input: { sql: string; source: string; connectionLabel: string
           ? \`<tr><td colspan="\${columns.length}" class="noMatchCell">No rows</td></tr>\`
           : '';
         return \`
-          <div class="tableWrap previewWrap">
+          <div class="tableWrap previewWrap" data-join-preview-wrap="\${escapeAttr(side)}">
             <table>
               <thead>
-                <tr>\${columns.map(c => \`<th class="\${c === joinKey ? 'joinColHead' : ''}">\${escapeHtml(c)}</th>\`).join('')}</tr>
+                <tr>\${columns.map(c => \`<th class="\${c === joinKey ? 'joinColHead' : ''}" data-column-name="\${escapeAttr(c)}">\${escapeHtml(c)}</th>\`).join('')}</tr>
               </thead>
               <tbody>
                 \${emptyRow || buildPreviewRowsHtml(rows, columns, joinKey, side)}
@@ -775,7 +772,7 @@ function renderApp(input: { sql: string; source: string; connectionLabel: string
         const whereHeaderStyle = 'background:linear-gradient(rgba(246,223,108,.14),rgba(246,223,108,.14)) #182142;color:#c9b840;';
         const headerHtml = cols.map(c => {
           const isWhere = whereCols.has(c);
-          return \`<th style="\${isWhere ? whereHeaderStyle : ''}">\${escapeHtml(c)}</th>\`;
+          return \`<th data-column-name="\${escapeAttr(c)}" style="\${isWhere ? whereHeaderStyle : ''}">\${escapeHtml(c)}</th>\`;
         }).join('');
 
         const bodyHtml = step.preFilterRows.map(row => {
@@ -820,7 +817,7 @@ function renderApp(input: { sql: string; source: string; connectionLabel: string
         return \`
           <div class="filteredViewBlock">
             <div class="filteredViewLabel">Filtered \${noun} view\${removedLabel}</div>
-            <div class="tableWrap filteredWrap">
+            <div class="tableWrap filteredWrap" id="filteredViewTableWrap">
               <table>
                 <thead><tr>\${headerHtml}</tr></thead>
                 <tbody>\${bodyHtml}</tbody>
@@ -972,8 +969,8 @@ function renderApp(input: { sql: string; source: string; connectionLabel: string
             isSort ? 'sortColHead' : '',
           ].filter(Boolean).join(' ');
           return isWindow
-            ? \`<th class="\${cls} windowHeaderCell" data-window-column="\${escapeAttr(c)}">\${escapeHtml(c)}\${badge}</th>\`
-            : \`<th class="\${cls}">\${escapeHtml(c)}\${badge}</th>\`;
+            ? \`<th class="\${cls} windowHeaderCell" data-window-column="\${escapeAttr(c)}" data-column-name="\${escapeAttr(c)}">\${escapeHtml(c)}\${badge}</th>\`
+            : \`<th class="\${cls}" data-column-name="\${escapeAttr(c)}">\${escapeHtml(c)}\${badge}</th>\`;
         }).join('');
 
         // For GROUP BY: each body row is clickable — mark with class + index for breakdown.
@@ -1027,7 +1024,7 @@ function renderApp(input: { sql: string; source: string; connectionLabel: string
             \${aggHint}
             \${windowHint}
             \${isGroupByStep ? '<div class="groupClickHint">Click a <span class="groupDot"></span> row to expand its source rows</div>' : ''}
-            <div class="tableWrap resultWrap">
+            <div class="tableWrap resultWrap" id="intermediateTableWrap">
               <table>
                 <thead>
                   <tr>\${headerHtml}</tr>
@@ -1070,6 +1067,103 @@ function renderApp(input: { sql: string; source: string; connectionLabel: string
           return '<span class="nullValue">NULL</span>';
         }
         return escapeHtml(value);
+      }
+
+      function normalizeColumnName(value) {
+        return String(value ?? '')
+          .replace(/[\u0060"]/g, '')
+          .trim()
+          .toLowerCase();
+      }
+
+      function getBareColumnName(value) {
+        const normalized = normalizeColumnName(value);
+        if (!normalized) {
+          return '';
+        }
+        const parts = normalized.split('.');
+        return parts[parts.length - 1];
+      }
+
+      function findRelevantHeader(wrapper, columns) {
+        if (!wrapper || !Array.isArray(columns) || columns.length === 0) {
+          return null;
+        }
+
+        const normalizedTargets = columns
+          .map((column) => ({
+            full: normalizeColumnName(column),
+            bare: getBareColumnName(column),
+          }))
+          .filter((target) => target.full);
+
+        if (normalizedTargets.length === 0) {
+          return null;
+        }
+
+        const headers = Array.from(wrapper.querySelectorAll('thead th'));
+        return headers.find((header) => {
+          const headerName = header.getAttribute('data-column-name') || header.textContent || '';
+          const normalizedHeader = normalizeColumnName(headerName);
+          const bareHeader = getBareColumnName(headerName);
+
+          return normalizedTargets.some((target) =>
+            target.full === normalizedHeader || target.bare === bareHeader
+          );
+        }) || null;
+      }
+
+      function scrollHeaderIntoView(wrapper, header) {
+        if (!wrapper || !header) {
+          return;
+        }
+
+        const visibleLeft = wrapper.scrollLeft;
+        const visibleRight = visibleLeft + wrapper.clientWidth;
+        const headerLeft = header.offsetLeft;
+        const headerRight = headerLeft + header.offsetWidth;
+        const padding = 24;
+
+        if (headerLeft >= visibleLeft && headerRight <= visibleRight) {
+          return;
+        }
+
+        const nextLeft = headerLeft < visibleLeft
+          ? Math.max(0, headerLeft - padding)
+          : Math.max(0, headerRight - wrapper.clientWidth + padding);
+
+        wrapper.scrollTo({ left: nextLeft, behavior: 'smooth' });
+      }
+
+      function autoScrollRelevantColumns(step) {
+        if (step.name === 'JOIN' && step.joinMeta) {
+          const leftWrapper = document.querySelector('[data-join-preview-wrap="left"]');
+          const rightWrapper = document.querySelector('[data-join-preview-wrap="right"]');
+          const leftHeader = findRelevantHeader(leftWrapper, [step.joinMeta.leftKeyCol]);
+          const rightHeader = findRelevantHeader(rightWrapper, [step.joinMeta.rightKeyCol]);
+          scrollHeaderIntoView(leftWrapper, leftHeader);
+          scrollHeaderIntoView(rightWrapper, rightHeader);
+          return;
+        }
+
+        const relevantColumns =
+          step.name === 'ORDER BY' ? (step.sortColumns || []) :
+          step.name === 'GROUP BY' ? (step.groupByColumns || []) :
+          step.name === 'WHERE' || step.name === 'HAVING' ? (step.whereColumns || []) :
+          [];
+
+        if (relevantColumns.length === 0) {
+          return;
+        }
+
+        const wrapperId =
+          step.name === 'ORDER BY' || step.name === 'GROUP BY'
+            ? 'intermediateTableWrap'
+            : 'filteredViewTableWrap';
+
+        const wrapper = document.getElementById(wrapperId);
+        const header = findRelevantHeader(wrapper, relevantColumns);
+        scrollHeaderIntoView(wrapper, header);
       }
 
       function jumpToStep(idx) {
@@ -1202,14 +1296,10 @@ function styles(): string {
       gap: 8px;
     }
     .flowBlock {
-      border: 1px solid rgba(62, 76, 128, 0.55);
-      border-radius: 10px;
-      padding: 8px 10px;
-      background: rgba(8, 16, 40, 0.32);
-    }
-    .flowBlock.activeBlock {
-      border-color: rgba(122, 162, 255, 0.65);
-      background: rgba(122, 162, 255, 0.08);
+      padding: 0;
+      background: transparent;
+      border: none;
+      border-radius: 0;
     }
     .flowBlockLabel {
       font-size: 10px;
