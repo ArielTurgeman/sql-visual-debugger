@@ -9,17 +9,21 @@ export class MysqlRunner {
     private connection: import('mysql2/promise').Connection | null = null;
 
     async connect(config: ConnectionConfig, password: string): Promise<void> {
-        this.connection = await mysql.createConnection({
-            host: config.host,
-            port: config.port,
-            user: config.user,
-            password,
-            database: config.database,
-            connectTimeout: 10_000,
-            // Prevent native bindings from being required in VS Code's bundled env
-            supportBigNumbers: true,
-            bigNumberStrings: true,
-        });
+        try {
+            this.connection = await mysql.createConnection({
+                host: config.host,
+                port: config.port,
+                user: config.user,
+                password,
+                database: config.database,
+                connectTimeout: 10_000,
+                // Prevent native bindings from being required in VS Code's bundled env
+                supportBigNumbers: true,
+                bigNumberStrings: true,
+            });
+        } catch (error) {
+            throw normalizeMysqlConnectionError(error, config);
+        }
 
         await this.connection.query('SET SESSION TRANSACTION READ ONLY');
         await this.connection.query('START TRANSACTION READ ONLY');
@@ -79,6 +83,66 @@ function normalizeMysqlQueryError(error: unknown): Error {
     }
 
     return new Error(String(error));
+}
+
+export function normalizeMysqlConnectionError(error: unknown, config: ConnectionConfig): Error {
+    const mysqlError = error instanceof Error
+        ? error as Error & { code?: string; address?: string; port?: number }
+        : undefined;
+    const code = mysqlError?.code;
+    const message = mysqlError?.message?.trim() ?? '';
+    const target = `${config.host}:${config.port}`;
+
+    if (code === 'ECONNREFUSED' || /connect ECONNREFUSED/i.test(message)) {
+        return buildMysqlConnectionError(
+            `SQL Debugger could not connect to MySQL at ${target}.\n` +
+            'Check that the host and port are correct and that the MySQL server is running.',
+            mysqlError,
+        );
+    }
+
+    if (code === 'ENOTFOUND' || code === 'EAI_AGAIN' || /getaddrinfo/i.test(message)) {
+        return buildMysqlConnectionError(
+            `SQL Debugger could not resolve the MySQL host "${config.host}".\n` +
+            'Check that the host name is correct and try again.',
+            mysqlError,
+        );
+    }
+
+    if (code === 'ETIMEDOUT' || /connect timed out|timeout/i.test(message)) {
+        return buildMysqlConnectionError(
+            `SQL Debugger timed out while connecting to MySQL at ${target}.\n` +
+            'Check that the host and port are correct and that the MySQL server is reachable.',
+            mysqlError,
+        );
+    }
+
+    if (mysqlError && message) {
+        return mysqlError;
+    }
+
+    return buildMysqlConnectionError(
+        `SQL Debugger could not connect to MySQL at ${target}.\n` +
+        'Check the host, port, username, password, and database name, then try again.',
+        mysqlError,
+    );
+}
+
+function buildMysqlConnectionError(
+    message: string,
+    sourceError?: Error & { code?: string; address?: string; port?: number },
+): Error {
+    const normalized = new Error(message) as Error & { code?: string; address?: string; port?: number };
+    if (sourceError?.code) {
+        normalized.code = sourceError.code;
+    }
+    if (sourceError?.address) {
+        normalized.address = sourceError.address;
+    }
+    if (sourceError?.port !== undefined) {
+        normalized.port = sourceError.port;
+    }
+    return normalized;
 }
 
 function assertReadOnlySql(sql: string): void {

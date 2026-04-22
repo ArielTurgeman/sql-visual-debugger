@@ -231,11 +231,15 @@ function splitStatements(text: string): StatementSlice[] {
         }
 
         if (char === ';') {
-            boundaries.push({ start: statementStart, end: i });
-            statementStart = i + 1;
+            let statementEnd = i + 1;
+            while (statementEnd < text.length && (text[statementEnd] === ' ' || text[statementEnd] === '\t' || text[statementEnd] === '\r')) {
+                statementEnd += 1;
+            }
+            boundaries.push({ start: statementStart, end: statementEnd });
+            statementStart = statementEnd;
             currentStatementRoot = null;
             lineHasCode = false;
-            i += 1;
+            i = statementEnd;
             continue;
         }
 

@@ -107,6 +107,7 @@ export function activate(context: vscode.ExtensionContext): void {
                     `SQL Debugger: server saved (${updated.user}@${updated.host})`
                 );
             }
+            return updated;
         })
     );
 
@@ -353,9 +354,12 @@ function registerMessageHandler(
             }
 
         } else if (msg.command === 'changeConnection') {
-            // "Change server / credentials" link — full server reconfigure only, no re-run.
-            // cachedPassword is cleared inside the configureConnection command handler.
-            await vscode.commands.executeCommand('sqlDebugger.configureConnection');
+            // "Change server / credentials" link — reconfigure the server, then
+            // retry the last query immediately so the error panel can recover in place.
+            const updated = await vscode.commands.executeCommand<ServerConnection | null>('sqlDebugger.configureConnection');
+            if (updated && lastRun) {
+                await rerunLastQueryInPanel(context, panel);
+            }
 
         } else if (msg.command === 'activeStep' && typeof msg.index === 'number') {
             // Webview navigated to a new step — highlight the matching SQL text

@@ -83,4 +83,70 @@ module.exports = function runOrderByStepTests(runTest, assert) {
       'ORDER BY score DESC, id ASC',
     );
   });
+
+  runTest('ORDER BY highlights aliased output columns when sorting by their source column names', async () => {
+    const runner = new FakeRunner([
+      {
+        ...sqlIncludes('select `city`.* from city'),
+        rows: [
+          { Population: 503400, Name: 'Tjumen' },
+          { Population: 506100, Name: 'Tula' },
+          { Population: 504420, Name: 'Sale' },
+        ],
+      },
+      {
+        ...sqlIncludes('select population, name as hopa from city'),
+        rows: [
+          { Population: 503400, hopa: 'Tjumen' },
+          { Population: 506100, hopa: 'Tula' },
+          { Population: 504420, hopa: 'Sale' },
+        ],
+      },
+      {
+        ...sqlIncludes('select population, name as hopa from city where population > 500000'),
+        rows: [
+          { Population: 503400, hopa: 'Tjumen' },
+          { Population: 506100, hopa: 'Tula' },
+          { Population: 504420, hopa: 'Sale' },
+        ],
+      },
+      {
+        ...sqlIncludes('select `population`, `name` as hopa from city where `population` > 500000'),
+        rows: [
+          { Population: 503400, hopa: 'Tjumen' },
+          { Population: 506100, hopa: 'Tula' },
+          { Population: 504420, hopa: 'Sale' },
+        ],
+      },
+      {
+        ...sqlIncludes('select `city`.`population`, `city`.`name` from city where `population` > 500000'),
+        rows: [
+          { Population: 503400, Name: 'Tjumen' },
+          { Population: 506100, Name: 'Tula' },
+          { Population: 504420, Name: 'Sale' },
+        ],
+      },
+      {
+        ...sqlIncludes('select population, name as hopa from city where population > 500000 order by population, name'),
+        rows: [
+          { Population: 503400, hopa: 'Tjumen' },
+          { Population: 504420, hopa: 'Sale' },
+          { Population: 506100, hopa: 'Tula' },
+        ],
+      },
+    ]);
+
+    const steps = await executeDebugSteps(
+      'SELECT `Population`, `Name` AS hopa FROM city WHERE `Population` > 500000 ORDER BY `Population`, `Name`',
+      runner,
+    );
+
+    const orderStep = steps.find(step => step.name === 'ORDER BY');
+    if (!orderStep) {
+      throw new Error('Expected an ORDER BY step but none was produced.');
+    }
+
+    assert.deepEqual(orderStep.columns, ['Population', 'hopa']);
+    assert.deepEqual(orderStep.sortColumns, ['Population', 'hopa']);
+  });
 };

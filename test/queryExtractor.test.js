@@ -126,7 +126,7 @@ SELECT * FROM users;
 
 SELECT * FROM orders;
     `.trim();
-    const cursorOffset = text.indexOf('\n\nSELECT * FROM orders');
+    const cursorOffset = text.indexOf('\n\nSELECT * FROM orders') + 1;
     const editor = createEditor(text, { cursorOffset });
 
     const result = extractQuery(editor);
@@ -136,6 +136,21 @@ SELECT * FROM orders;
         'Could not determine which query to debug.\n' +
         'Place the cursor inside one query or select the query you want.',
     });
+  });
+
+  runTest('extractQuery keeps the cursor with the preceding query when it sits immediately after that query semicolon', () => {
+    const text = `
+SELECT * FROM users;
+ SELECT * FROM orders;
+    `.trim();
+    const cursorOffset = text.indexOf(';') + 1;
+    const editor = createEditor(text, { cursorOffset, fileName: 'two-queries.sql' });
+
+    const result = extractQuery(editor);
+
+    assert.ok(!('error' in result));
+    assert.equal(result.sql, 'SELECT * FROM users');
+    assert.equal(result.source, 'two-queries.sql');
   });
 
   runTest('extractQuery rejects recursive CTE queries', () => {

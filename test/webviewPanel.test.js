@@ -1,4 +1,5 @@
 const Module = require('node:module');
+const fs = require('node:fs');
 const { executeDebugSteps } = require('../out/engine/stepEngine');
 
 function loadPanelModule() {
@@ -220,5 +221,171 @@ module.exports = function runWebviewPanelTests(runTest, assert) {
     assert.match(panel.webview.html, /isSort \? 'sortColCell' : ''/);
     assert.match(panel.webview.html, /!isDupe && isJoined \? 'joinedColCell' : ''/);
     assert.doesNotMatch(panel.webview.html, /const cls = isDupe\s+\? 'joinedColHead dupeHead'[\s\S]*?: isSort\s+\? 'sortColHead'/);
+  });
+
+  runTest('join UI uses the specific join type in roadmap and preview text', () => {
+    const { sendResult } = loadPanelModule();
+    const panel = { webview: { html: '' } };
+    sendResult(
+      panel,
+      'SELECT city.Name, countrylanguage.Language FROM city LEFT JOIN countrylanguage ON countrylanguage.CountryCode = city.CountryCode',
+      'left-join.sql',
+      'demo@localhost',
+      [
+        {
+          name: 'JOIN',
+          title: 'LEFT JOIN',
+          explanation: 'test',
+          sqlFragment: 'LEFT JOIN countrylanguage ON countrylanguage.CountryCode = city.CountryCode',
+          rowsBefore: 2,
+          rowsAfter: 3,
+          data: [
+            { Name: 'A', Language: 'X' },
+            { Name: 'B', Language: null },
+          ],
+          columns: ['Name', 'Language'],
+          joinMeta: {
+            leftTable: 'city',
+            rightTable: 'countrylanguage',
+            leftKey: 'countrylanguage.CountryCode',
+            rightKey: 'city.CountryCode',
+            leftKeyCol: 'CountryCode',
+            rightKeyCol: 'CountryCode',
+            joinType: 'LEFT JOIN',
+            leftRows: [{ CountryCode: 'A' }],
+            rightRows: [{ CountryCode: 'A', Language: 'X' }],
+            allLeftRows: [{ CountryCode: 'A' }, { CountryCode: 'B' }],
+            allRightRows: [{ CountryCode: 'A', Language: 'X' }],
+            leftColumns: ['CountryCode'],
+            rightColumns: ['CountryCode', 'Language'],
+            relationship: 'many-to-many',
+            rowDelta: 1,
+            joinedResultColumns: ['Name', 'Language'],
+            joinIndicatorColumns: ['Language'],
+          },
+        },
+      ],
+      'demo',
+      ['demo'],
+    );
+
+    assert.match(panel.webview.html, /const joinTypeLabel = jm\.joinType \|\| step\.title \|\| 'JOIN';/);
+    assert.match(panel.webview.html, /describeJoinType\(jm\.joinType, jm\.leftTable, jm\.rightTable\)/);
+    assert.match(panel.webview.html, /LEFT JOIN'/);
+    assert.match(panel.webview.html, /function describeJoinType\(joinType, leftTable, rightTable\)/);
+  });
+
+  runTest('filtered view summary uses actual WHERE totals instead of the capped preview length', () => {
+    const { sendResult } = loadPanelModule();
+    const panel = { webview: { html: '' } };
+
+    sendResult(
+      panel,
+      'SELECT * FROM city WHERE Population > 50000',
+      'world.sql',
+      'demo@localhost',
+      [
+        {
+          name: 'WHERE',
+          title: 'WHERE',
+          explanation: 'test',
+          impact: 'test',
+          sqlFragment: 'WHERE Population > 50000',
+          rowsBefore: 4079,
+          rowsAfter: 4001,
+          data: Array.from({ length: 200 }, (_, idx) => ({
+            ID: idx + 1,
+            Name: `City ${idx + 1}`,
+            Population: 60000 + idx,
+          })),
+          columns: ['ID', 'Name', 'Population'],
+          preFilterRows: Array.from({ length: 200 }, (_, idx) => ({
+            ID: idx + 1,
+            Name: `City ${idx + 1}`,
+            Population: idx < 5 ? 1000 + idx : 60000 + idx,
+          })),
+          preFilterColumns: ['ID', 'Name', 'Population'],
+          whereColumns: ['Population'],
+        },
+      ],
+      'demo',
+      ['demo'],
+    );
+
+    assert.match(
+      panel.webview.html,
+      /const removedCount = Math\.max\(0, \(step\.rowsBefore \|\| 0\) - \(step\.rowsAfter \|\| 0\)\);/,
+    );
+    assert.match(
+      panel.webview.html,
+      /const previewCount = step\.preFilterRows\.length;/,
+    );
+    assert.match(
+      panel.webview.html,
+      /const totalBefore = step\.rowsBefore \|\| previewCount;/,
+    );
+    assert.doesNotMatch(
+      panel.webview.html,
+      /const removedCount = \(step\.preFilterRows\.length\) - \(step\.rowsAfter \|\| 0\);/,
+    );
+    assert.match(
+      panel.webview.html,
+      /<div class="sectionTitle">Filtered \$\{noun\} preview <span class="subtle">/,
+    );
+    assert.match(
+      panel.webview.html,
+      /removed total|none removed/,
+    );
+    assert.match(
+      panel.webview.html,
+      /display limit reached/,
+    );
+  });
+
+  runTest('group breakdown filters by group keys, caps rows, and auto-scrolls aggregation columns', () => {
+    const { sendResult } = loadPanelModule();
+    const compiledPanelSource = fs.readFileSync(require.resolve('../out/webview/panel'), 'utf8');
+    const panel = { webview: { html: '' } };
+    sendResult(
+      panel,
+      'SELECT CountryCode, AVG(Population) AS hopa FROM city GROUP BY CountryCode',
+      'groupby.sql',
+      'demo@localhost',
+      [
+        {
+          name: 'GROUP BY',
+          title: 'GROUP BY',
+          explanation: 'test',
+          sqlFragment: 'GROUP BY CountryCode',
+          rowsBefore: 4079,
+          rowsAfter: 232,
+          data: [
+            { CountryCode: 'ABW', hopa: 29034 },
+            { CountryCode: 'AFG', hopa: 583025 },
+          ],
+          columns: ['CountryCode', 'hopa'],
+          groupByColumns: ['CountryCode'],
+          aggColumns: [{ col: 'hopa', fn: 'AVG', srcCol: 'Population' }],
+          aggSummary: 'AVG(Population)',
+          preGroupRows: Array.from({ length: 500 }, (_, idx) => ({
+            ID: idx + 1,
+            CountryCode: idx < 250 ? 'ABW' : 'AFG',
+            Population: 1000 + idx,
+          })),
+          preGroupColumns: ['ID', 'CountryCode', 'Population'],
+        },
+      ],
+      'demo',
+      ['demo'],
+    );
+
+    assert.match(panel.webview.html, /breakdownLimit = 200/);
+    assert.match(panel.webview.html, /const breakdownRows = matching\.slice\(0, breakdownLimit\);/);
+    assert.match(panel.webview.html, /groupBreakdownTableWrap/);
+    assert.match(panel.webview.html, /autoScrollGroupBreakdown\(step\)/);
+    assert.ok(compiledPanelSource.includes('bdAggSrcHead" data-column-name="\\${escapeAttr(c)}"'));
+    assert.ok(compiledPanelSource.includes('<th data-column-name="\\${escapeAttr(c)}">\\${escapeHtml(c)}</th>'));
+    assert.match(panel.webview.html, /step\.name === 'GROUP BY' \? \[/);
+    assert.match(panel.webview.html, /step\.aggColumns \|\| \[\]\)\.map\(\(agg\) => agg\.col\)/);
   });
 };

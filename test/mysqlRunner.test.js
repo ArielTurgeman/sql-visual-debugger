@@ -1,4 +1,8 @@
-const { MysqlRunner, MYSQL_DEBUG_QUERY_TIMEOUT_MS } = require('../out/mysql/mysqlRunner');
+const {
+  MysqlRunner,
+  MYSQL_DEBUG_QUERY_TIMEOUT_MS,
+  normalizeMysqlConnectionError,
+} = require('../out/mysql/mysqlRunner');
 
 module.exports = function runMysqlRunnerTests(runTest, assert) {
   runTest('MysqlRunner applies the configured query timeout to executions', async () => {
@@ -33,6 +37,34 @@ module.exports = function runMysqlRunnerTests(runTest, assert) {
       () => runner.query('SELECT SLEEP(15)'),
       /timed out after/i,
     );
+  });
+
+  runTest('MysqlRunner maps wrong host or port connection failures to a visible message', () => {
+    const error = new Error('');
+    error.code = 'ECONNREFUSED';
+
+    const normalized = normalizeMysqlConnectionError(error, {
+      host: 'localhost',
+      port: 3307,
+      user: 'root',
+      database: 'world',
+    });
+
+    assert.match(normalized.message, /could not connect to mysql at localhost:3307/i);
+    assert.match(normalized.message, /host and port are correct/i);
+    assert.equal(normalized.code, 'ECONNREFUSED');
+  });
+
+  runTest('MysqlRunner falls back to a non-empty connection message when mysql returns none', () => {
+    const normalized = normalizeMysqlConnectionError({ code: 'UNKNOWN' }, {
+      host: 'localhost',
+      port: 3306,
+      user: 'root',
+      database: 'world',
+    });
+
+    assert.match(normalized.message, /could not connect to mysql at localhost:3306/i);
+    assert.match(normalized.message, /check the host, port, username, password, and database name/i);
   });
 
   runTest('MysqlRunner rejects non-read-only SQL before execution', async () => {

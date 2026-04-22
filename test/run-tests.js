@@ -5,6 +5,7 @@ const suites = [
   require('./databaseDetection.test'),
   require('./queryExtractor.test'),
   require('./queryBlocks.test'),
+  require('./extensionPanelFlow.test'),
   require('./mysqlRunner.test'),
   require('./webviewPanel.test'),
   require('./cteStep.test'),

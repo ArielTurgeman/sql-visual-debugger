@@ -131,18 +131,45 @@ export function detectHavingColumns(
   return columns.filter(col => matchedAliases.has((col.includes('.') ? col.split('.').pop()! : col).toUpperCase()));
 }
 
-export function detectOrderByColumns(orderByClause: string, columns: string[]): string[] {
+export function detectOrderByColumns(orderByClause: string, columns: string[], selectClause?: string): string[] {
   const body = orderByClause.replace(/^ORDER\s+BY\s+/i, '');
-  const terms = body.split(',').map(term => term
+  const terms = splitTopLevelSelectItems(body).map(term => term
     .trim()
     .replace(/\s+(ASC|DESC)\s*$/i, '')
-    .replace(/`/g, '')
-    .trim()
-    .split('.')
-    .pop()!
-    .toLowerCase());
-  const termSet = new Set(terms);
-  return columns.filter(col => termSet.has((col.includes('.') ? col.split('.').pop()! : col).toLowerCase()));
+    .trim());
+  const matched = new Set<string>();
+
+  const directTerms = new Set(terms.map(term => bareIdentifier(term).toLowerCase()));
+  columns.forEach(col => {
+    if (directTerms.has(bareIdentifier(col).toLowerCase())) {
+      matched.add(col);
+    }
+  });
+
+  if (!selectClause) {
+    return Array.from(matched);
+  }
+
+  const selectItems = splitTopLevelSelectItems(selectClause.replace(/^SELECT\s+/i, ''));
+  for (const item of selectItems) {
+    const aliasMatch = item.match(/^(.*?)(?:\s+AS\s+`?([A-Za-z_][A-Za-z0-9_]*)`?)$/i);
+    const expr = (aliasMatch ? aliasMatch[1] : item).trim();
+    const alias = aliasMatch?.[2];
+    if (!alias) continue;
+
+    const outputColumn = columns.find(col => bareIdentifier(col).toLowerCase() === alias.toLowerCase());
+    if (!outputColumn) continue;
+
+    const simpleColumnExpr = /^(?:`[^`]+`|[A-Za-z_][A-Za-z0-9_]*)(?:\.(?:`[^`]+`|[A-Za-z_][A-Za-z0-9_]*))?$/.test(expr);
+    if (!simpleColumnExpr) continue;
+
+    const sourceBare = bareIdentifier(expr).toLowerCase();
+    if (directTerms.has(sourceBare)) {
+      matched.add(outputColumn);
+    }
+  }
+
+  return Array.from(matched);
 }
 
 export function detectGroupByColumns(groupByClause: string, columns: string[]): string[] {

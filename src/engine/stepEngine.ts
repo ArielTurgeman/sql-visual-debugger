@@ -327,7 +327,7 @@ async function executeSingleQueryBlockSteps(
       rows,
       columns,
       schemaContext,
-      sortColumns: detectOrderByColumns(parsed.orderByClause, columns),
+      sortColumns: detectOrderByColumns(parsed.orderByClause, columns, parsed.selectClause),
     }));
     currentRows = rows;
   }

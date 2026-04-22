@@ -207,6 +207,10 @@ function renderApp(input: { sql: string; source: string; connectionLabel: string
         const deps = Array.isArray(step.blockDependencies) && step.blockDependencies.length > 0
           ? \`<div class="blockDeps">Depends on: \${escapeHtml(step.blockDependencies.join(', '))}</div>\`
           : '';
+        const countLabel = matching.length > breakdownRows.length
+          ? \`Showing \${formatNumber(breakdownRows.length)} of \${formatNumber(matching.length)} row(s) <span class="truncatedHint">(display limit reached)</span>\`
+          : \`\${matching.length} row\${matching.length === 1 ? '' : 's'} contributed to this group\`;
+
         return \`
           <div class="blockSummary">
             <span class="blockBadge \${step.blockType === 'cte' ? 'cteBadge' : step.blockType === 'subquery' ? 'subqueryBadge' : 'mainBadge'}">\${escapeHtml(step.blockType === 'cte' ? 'CTE Block' : step.blockType === 'subquery' ? 'Subquery Block' : 'Main Query')}</span>
@@ -226,7 +230,7 @@ function renderApp(input: { sql: string; source: string; connectionLabel: string
           <div class="flowBlock \${group.key === activeKey ? 'activeBlock' : ''}">
             \${showGroupLabels ? \`<div class="flowBlockLabel">\${escapeHtml(group.blockType === 'cte' ? \`CTE \${group.cteNumber}: \${group.blockName}\` : group.blockType === 'subquery' ? \`SUBQUERY \${group.subqueryNumber}: \${group.blockName}\` : 'MAIN QUERY')}</div>\` : ''}
             <div class="flowBlockNodes">
-              \${group.steps.map(({ step, idx }) => \`<button type="button" class="flowNode flowNodeBtn \${idx === currentStepIndex ? "active" : ""}" data-step-index="\${idx}">\${escapeHtml(step.name)}</button>\`).join(\`<span class="arrow">ג†’</span>\`)}
+              \${group.steps.map(({ step, idx }) => \`<button type="button" class="flowNode flowNodeBtn \${idx === currentStepIndex ? "active" : ""}" data-step-index="\${idx}">\${escapeHtml(step.title || step.name)}</button>\`).join(\`<span class="arrow">ג†’</span>\`)}
             </div>
           </div>\`
         ).join('');
@@ -263,7 +267,7 @@ function renderApp(input: { sql: string; source: string; connectionLabel: string
             </div>
           </div>
 
-          <div class="flow card">\${state.steps.map((s, idx) => \`<button type="button" class="flowNode flowNodeBtn \${idx === currentStepIndex ? "active" : ""}" data-step-index="\${idx}">\${escapeHtml(s.name)}</button>\`).join(\`<span class="arrow">→</span>\`)}</div>
+          <div class="flow card">\${state.steps.map((s, idx) => \`<button type="button" class="flowNode flowNodeBtn \${idx === currentStepIndex ? "active" : ""}" data-step-index="\${idx}">\${escapeHtml(s.title || s.name)}</button>\`).join(\`<span class="arrow">→</span>\`)}</div>
 
           <div class="card">
             \${renderBlockSummary(step)}
@@ -314,9 +318,11 @@ function renderApp(input: { sql: string; source: string; connectionLabel: string
 
       function renderJoinPanel(step) {
         const jm = step.joinMeta;
+        const joinTypeLabel = jm.joinType || step.title || 'JOIN';
+        const joinTypeExplanation = describeJoinType(jm.joinType, jm.leftTable, jm.rightTable);
         return \`
           <div class="card">
-            <div class="sectionTitle">JOIN preview</div>
+            <div class="sectionTitle">\${escapeHtml(joinTypeLabel)} preview</div>
             <div class="joinHint">Click a <span class="yellowDot"></span> row to filter matches in the other table</div>
             <div class="joinPreviewGrid">
               <div class="previewPane" data-pane-side="left">
@@ -331,11 +337,13 @@ function renderApp(input: { sql: string; source: string; connectionLabel: string
                 \${renderPreviewTable(jm.leftRows, jm.leftColumns, jm.leftKeyCol, "left")}
               </div>
               <div class="joinBridge">
-                JOIN ON
+                \${escapeHtml(joinTypeLabel)} ON
                 <br/>
                 <span>\${escapeHtml(jm.leftKey)} ⇄ \${escapeHtml(jm.rightKey)}</span>
                 <br/>
                 <span class="joinBridgeRel">\${escapeHtml(jm.relationship)}</span>
+                <br/>
+                <span class="joinBridgeTypeHelp">\${escapeHtml(joinTypeExplanation)}</span>
               </div>
               <div class="previewPane" data-pane-side="right">
                 <div class="previewHeader">
@@ -350,6 +358,20 @@ function renderApp(input: { sql: string; source: string; connectionLabel: string
               </div>
             </div>
           </div>\`;
+      }
+
+      function describeJoinType(joinType, leftTable, rightTable) {
+        const normalized = String(joinType || '').toUpperCase();
+        if (normalized === 'LEFT JOIN') {
+          return \`Keeps all rows from \${leftTable}, even when there is no match in \${rightTable}.\`;
+        }
+        if (normalized === 'RIGHT JOIN') {
+          return \`Keeps all rows from \${rightTable}, even when there is no match in \${leftTable}.\`;
+        }
+        if (normalized === 'FULL OUTER JOIN') {
+          return \`Keeps matched rows plus unmatched rows from both \${leftTable} and \${rightTable}.\`;
+        }
+        return \`Keeps only rows where \${leftTable} and \${rightTable} match on the join keys.\`;
       }
 
       /** Builds <tr> elements for a preview table. Rows carry data-join-value for click handling. */
@@ -512,22 +534,11 @@ function renderApp(input: { sql: string; source: string; connectionLabel: string
         const groupRow  = step.data[rowIdx];
         const preRows   = step.preGroupRows   || [];
         const preCols   = step.preGroupColumns || (preRows.length > 0 ? Object.keys(preRows[0]) : []);
-        const aggOutputCols = new Set((step.aggColumns || []).map((agg) => agg.col));
-        const outputGroupCols = (step.columns || []).filter((col) => !aggOutputCols.has(col));
-        const groupTerms = String(step.sqlFragment || '')
-          .replace(/^GROUP\s+BY\s+/i, '')
-          .split(',')
-          .map((term) => term.trim())
-          .filter(Boolean);
-
-        const groupMappings = groupTerms.map((term, index) => {
-          const bareTerm = getBareColumnName(term);
-          const sourceColumn = preCols.find((col) => getBareColumnName(col) === bareTerm) || null;
-          const outputColumn =
-            outputGroupCols[index] ||
-            (step.groupByColumns || []).find((col) => getBareColumnName(col) === bareTerm) ||
-            null;
-
+        const breakdownLimit = 200;
+        const groupMappings = (step.groupByColumns || []).map((groupCol) => {
+          const bareGroupCol = getBareColumnName(groupCol);
+          const sourceColumn = preCols.find((col) => getBareColumnName(col) === bareGroupCol) || null;
+          const outputColumn = (step.columns || []).find((col) => getBareColumnName(col) === bareGroupCol) || groupCol;
           return { sourceColumn, outputColumn };
         }).filter((mapping) => mapping.sourceColumn && mapping.outputColumn);
 
@@ -565,26 +576,30 @@ function renderApp(input: { sql: string; source: string; connectionLabel: string
           const aggFn = aggSrcMap.get(bare);
           // Aggregation source column: violet tint header + reuse existing .aggBadge pill.
           if (aggFn) {
-            return \`<th class="bdAggSrcHead">\${escapeHtml(c)}<span class="aggBadge">\${escapeHtml(aggFn)}</span></th>\`;
+            return \`<th class="bdAggSrcHead" data-column-name="\${escapeAttr(c)}">\${escapeHtml(c)}<span class="aggBadge">\${escapeHtml(aggFn)}</span></th>\`;
           }
           // All other columns (including GROUP BY key) are plain — the breakdown's job is to
           // highlight the calculation source, not to re-emphasise the grouping key.
-          return \`<th>\${escapeHtml(c)}</th>\`;
+          return \`<th data-column-name="\${escapeAttr(c)}">\${escapeHtml(c)}</th>\`;
         }).join('');
 
-        const bodyHtml = matching.map(row =>
+        const breakdownRows = matching.slice(0, breakdownLimit);
+        const bodyHtml = breakdownRows.map(row =>
           \`<tr>\${preCols.map(c => {
             const bare  = (c.includes('.') ? c.split('.').pop() : c).toLowerCase();
             const isAgg = aggSrcMap.has(bare);
             return \`<td\${isAgg ? ' class="bdAggSrcCell"' : ''}>\${renderCellValue(row[c])}</td>\`;
           }).join('')}</tr>\`
         ).join('');
+        const countLabel = matching.length > breakdownRows.length
+          ? \`Showing \${formatNumber(breakdownRows.length)} of \${formatNumber(matching.length)} row(s) <span class="truncatedHint">(display limit reached)</span>\`
+          : \`\${matching.length} row\${matching.length === 1 ? '' : 's'} contributed to this group\`;
 
         return \`
           <div class="card groupBreakdownCard">
             <div class="groupBreakdownTitle">GROUP BREAKDOWN — \${groupLabel}</div>
-            <div class="groupBreakdownSub">\${matching.length} row\${matching.length === 1 ? '' : 's'} contributed to this group</div>
-            <div class="tableWrap breakdownWrap">
+            <div class="groupBreakdownSub">\${countLabel}</div>
+            <div class="tableWrap breakdownWrap" id="groupBreakdownTableWrap">
               <table>
                 <thead><tr>\${headerHtml}</tr></thead>
                 <tbody>\${bodyHtml}</tbody>
@@ -612,8 +627,22 @@ function renderApp(input: { sql: string; source: string; connectionLabel: string
 
             const rowIdx = parseInt(tr.getAttribute('data-rowindex') || '0', 10);
             container.innerHTML = renderGroupBreakdown(step, rowIdx);
+            autoScrollGroupBreakdown(step);
           });
         });
+      }
+
+      function autoScrollGroupBreakdown(step) {
+        const wrapper = document.getElementById('groupBreakdownTableWrap');
+        if (!wrapper) return;
+
+        const aggSourceColumns = (step.aggColumns || [])
+          .map((agg) => agg.srcCol)
+          .filter(Boolean);
+        if (aggSourceColumns.length === 0) return;
+
+        const header = findRelevantHeader(wrapper, aggSourceColumns);
+        scrollHeaderIntoView(wrapper, header);
       }
 
       // ─────────────────────────────────────────────────────────────────────────
@@ -832,17 +861,27 @@ function renderApp(input: { sql: string; source: string; connectionLabel: string
           }
         }).join('');
 
-        const removedCount = (step.preFilterRows.length) - (step.rowsAfter || 0);
+        // The filtered preview is intentionally capped, so its row count cannot be
+        // used to summarize the actual effect of the filter. Use the step totals.
+        const removedCount = Math.max(0, (step.rowsBefore || 0) - (step.rowsAfter || 0));
+        const previewCount = step.preFilterRows.length;
+        const totalBefore = step.rowsBefore || previewCount;
+        const previewLabel = previewCount < totalBefore
+          ? \`Showing \${formatNumber(previewCount)} of \${formatNumber(totalBefore)}\`
+          : formatNumber(previewCount);
         const removedLabel = removedCount > 0
-          ? \`<span style="color:#ff7070;font-size:10px;margin-left:6px;">\${removedCount} removed</span>\`
-          : \`<span style="color:#43c882;font-size:10px;margin-left:6px;">none removed</span>\`;
+          ? \`<span class="filteredViewMetaNeg">\${formatNumber(removedCount)} removed total</span>\`
+          : \`<span class="filteredViewMetaPos">none removed</span>\`;
         // WHERE filters individual rows; HAVING filters aggregated groups.
         // Use the appropriate noun so the label stays accurate in both steps.
         const noun = step.name === 'HAVING' ? 'groups' : 'rows';
+        const previewSuffix = previewCount < totalBefore
+          ? \` row(s) <span class="truncatedHint">(display limit reached)</span>\`
+          : ' row(s)';
 
         return \`
           <div class="filteredViewBlock">
-            <div class="filteredViewLabel">Filtered \${noun} view\${removedLabel}</div>
+            <div class="sectionTitle">Filtered \${noun} preview <span class="subtle">\${previewLabel}\${previewSuffix}, \${removedLabel}</span></div>
             <div class="tableWrap filteredWrap" id="filteredViewTableWrap">
               <table>
                 <thead><tr>\${headerHtml}</tr></thead>
@@ -1174,7 +1213,10 @@ function renderApp(input: { sql: string; source: string; connectionLabel: string
 
         const relevantColumns =
           step.name === 'ORDER BY' ? (step.sortColumns || []) :
-          step.name === 'GROUP BY' ? (step.groupByColumns || []) :
+          step.name === 'GROUP BY' ? [
+            ...((step.aggColumns || []).map((agg) => agg.col)),
+            ...(step.groupByColumns || []),
+          ] :
           step.name === 'WHERE' || step.name === 'HAVING' ? (step.whereColumns || []) :
           [];
 
@@ -1623,6 +1665,14 @@ function styles(): string {
       letter-spacing: 0.03em;
       text-transform: uppercase;
     }
+    .joinBridgeTypeHelp {
+      display: inline-block;
+      margin-top: 5px;
+      color: var(--muted);
+      font-size: 9px;
+      line-height: 1.35;
+      max-width: 160px;
+    }
     .joinHint { font-size: 10px; color: var(--muted); margin-bottom: 4px; }
     .tableWrap {
       overflow: auto;
@@ -1924,15 +1974,9 @@ function styles(): string {
     .sortColCell { background: rgba(246,223,108,.07); }
     /* Filtered Rows View — WHERE and HAVING steps pre/post filter visualisation */
     .filteredViewBlock { margin: 6px 0 4px; }
-    .filteredViewLabel {
-      font-size: 10px;
-      color: var(--muted);
-      margin-bottom: 4px;
-      letter-spacing: 0.02em;
-      text-transform: uppercase;
-      display: flex;
-      align-items: center;
-    }
+    .filteredViewBlock .sectionTitle { margin-bottom: 4px; }
+    .filteredViewMetaNeg { color: #ff7070; }
+    .filteredViewMetaPos { color: #43c882; }
     .filteredWrap { max-height: 180px; overflow-x: auto; overflow-y: auto; }
     .filteredWrap table { width: max-content; min-width: 100%; }
     .whereSubqueryBlock { margin-top: 10px; }
