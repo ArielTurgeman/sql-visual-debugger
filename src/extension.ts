@@ -5,7 +5,7 @@ import { computeStepRanges } from './editor/rangeMapper';
 import { assertLocalOnlyServer, getLocalOnlyHostError } from './mysql/localHostPolicy';
 import { MysqlRunner } from './mysql/mysqlRunner';
 import { executeDebugSteps } from './engine/stepEngine';
-import { getOrCreatePanel, sendLoading, sendResult, sendError } from './webview/panel';
+import { getOrCreatePanel, recreatePanel, sendLoading, sendResult, sendError } from './webview/panel';
 import type { ConnectionConfig, ServerConnection } from './types';
 
 // ─── Trial ─────────────────────────────────────────────────────────────────
@@ -123,11 +123,9 @@ export function activate(context: vscode.ExtensionContext): void {
 
             // If the panel is already open and we have SQL from a previous run,
             // re-run immediately without going through the editor check.
-            const panel = getOrCreatePanel(context);
+            const panel = recreatePanel(context);
             if (lastRun) {
-                clearDecorations();
-                sendLoading(panel);
-                await executeDebugSession(context, panel, lastRun.rawText, lastRun.source);
+                await rerunLastQueryInPanel(context, panel);
             } else {
                 // No previous run — fall back to the normal command (editor must be focused).
                 await vscode.commands.executeCommand('sqlDebugger.debugQuery');
@@ -196,17 +194,42 @@ async function runDebugger(context: vscode.ExtensionContext): Promise<void> {
 
     // 5. Open (or focus) the panel; clear any decorations from the previous run
     const panel = getOrCreatePanel(context);
-    clearDecorations();
-    sendLoading(panel);
+    await preparePanelForExecution(context, panel);
 
     // 6. Register the webview → extension message handler (replaces previous run's handler)
-    registerMessageHandler(context, panel);
 
     // 7. One-time migration of the legacy combined config key
     migrateLegacyConfig(context);
 
     // 8. Execute
     await executeDebugSession(context, panel, rawText, source);
+}
+
+async function preparePanelForExecution(
+    context: vscode.ExtensionContext,
+    panel: vscode.WebviewPanel,
+): Promise<void> {
+    clearDecorations();
+    sendLoading(panel);
+    registerMessageHandler(context, panel);
+}
+
+async function rerunLastQueryInPanel(
+    context: vscode.ExtensionContext,
+    panel: vscode.WebviewPanel,
+): Promise<void> {
+    if (!lastRun) {
+        return;
+    }
+
+    // Do NOT call sendLoading here — replacing the webview HTML twice in quick
+    // succession on a visible panel (loading → result) triggers a VS Code webview
+    // rendering bug that leaves the panel black until it is closed and reopened.
+    // Skipping the loading state means the old result stays visible while the new
+    // query runs, then gets replaced exactly once by sendResult / sendError.
+    clearDecorations();
+    registerMessageHandler(context, panel);
+    await executeDebugSession(context, panel, lastRun.rawText, lastRun.source);
 }
 
 /**
@@ -315,9 +338,7 @@ function registerMessageHandler(
             cachedPassword = undefined;
             await activateDatabase(context, msg.database as string);
             if (lastRun) {
-                clearDecorations();
-                sendLoading(panel);
-                await executeDebugSession(context, panel, lastRun.rawText, lastRun.source);
+                await rerunLastQueryInPanel(context, panel);
             }
 
         } else if (msg.command === 'promptDatabase') {
@@ -327,9 +348,7 @@ function registerMessageHandler(
                 cachedPassword = undefined;
                 await activateDatabase(context, db);
                 if (lastRun) {
-                    clearDecorations();
-                    sendLoading(panel);
-                    await executeDebugSession(context, panel, lastRun.rawText, lastRun.source);
+                    await rerunLastQueryInPanel(context, panel);
                 }
             }
 

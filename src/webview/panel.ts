@@ -23,6 +23,11 @@ export function getOrCreatePanel(context: vscode.ExtensionContext): vscode.Webvi
   return currentPanel;
 }
 
+export function recreatePanel(context: vscode.ExtensionContext): vscode.WebviewPanel {
+  currentPanel?.dispose();
+  return getOrCreatePanel(context);
+}
+
 export function sendLoading(panel: vscode.WebviewPanel): void {
   panel.webview.html = renderShell({ state: 'loading' });
 }
@@ -505,17 +510,38 @@ function renderApp(input: { sql: string; source: string; connectionLabel: string
        */
       function renderGroupBreakdown(step, rowIdx) {
         const groupRow  = step.data[rowIdx];
-        const gbCols    = step.groupByColumns || [];
         const preRows   = step.preGroupRows   || [];
         const preCols   = step.preGroupColumns || (preRows.length > 0 ? Object.keys(preRows[0]) : []);
+        const aggOutputCols = new Set((step.aggColumns || []).map((agg) => agg.col));
+        const outputGroupCols = (step.columns || []).filter((col) => !aggOutputCols.has(col));
+        const groupTerms = String(step.sqlFragment || '')
+          .replace(/^GROUP\s+BY\s+/i, '')
+          .split(',')
+          .map((term) => term.trim())
+          .filter(Boolean);
+
+        const groupMappings = groupTerms.map((term, index) => {
+          const bareTerm = getBareColumnName(term);
+          const sourceColumn = preCols.find((col) => getBareColumnName(col) === bareTerm) || null;
+          const outputColumn =
+            outputGroupCols[index] ||
+            (step.groupByColumns || []).find((col) => getBareColumnName(col) === bareTerm) ||
+            null;
+
+          return { sourceColumn, outputColumn };
+        }).filter((mapping) => mapping.sourceColumn && mapping.outputColumn);
 
         // Filter source rows that contributed to this group.
         const matching = preRows.filter(row =>
-          gbCols.every(col => String(row[col] ?? '') === String(groupRow[col] ?? ''))
+          groupMappings.every(({ sourceColumn, outputColumn }) =>
+            String(row[sourceColumn] ?? '') === String(groupRow[outputColumn] ?? '')
+          )
         );
 
         // Human-readable group label for the panel title.
-        const groupLabel = gbCols.map(col => escapeHtml(String(groupRow[col] ?? ''))).join(', ');
+        const groupLabel = groupMappings
+          .map(({ outputColumn }) => escapeHtml(String(groupRow[outputColumn] ?? '')))
+          .join(', ');
 
         if (preCols.length === 0 || matching.length === 0) {
           return \`<div class="card groupBreakdownCard">
