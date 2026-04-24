@@ -3,7 +3,7 @@
   "displayName": "SQL Visual Debugger",
   "description": "Step through supported MySQL SELECT queries clause by clause and inspect intermediate results inside VS Code.",
   "icon": "icon.png",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "publisher": "sql-visual-debugger",
   "license": "MIT",
   "repository": {

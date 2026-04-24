@@ -237,7 +237,7 @@ async function executeSingleQueryBlockSteps(
       groupByColumns: detectGroupByColumns(parsed.groupByClause, groupedCols),
       aggColumns: detectAggColumns(parsed.selectClause, groupedCols),
       aggSummary: buildAggSummary(parsed.selectClause) || undefined,
-      preGroupRows: currentRows.slice(0, 500),
+      preGroupRows: currentRows,
       preGroupColumns: getColumns(currentRows),
     }));
     currentRows = rows;

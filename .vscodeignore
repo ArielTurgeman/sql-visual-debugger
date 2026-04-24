@@ -1,17 +1,24 @@
-# Source TypeScript — compiled output (out/) is what ships
+# Source TypeScript - compiled output (out/) is what ships
 src/
 tsconfig.json
+test/
 
 # Dev-only node_modules (keep production deps like mysql2)
 node_modules/.bin/
 node_modules/@types/
 node_modules/typescript/
 
-# Local dev / editor config — never ship these
+# Local dev / editor config - never ship these
 .claude/
 .vscode/
 .git/
 .gitignore
+_review_images/
+Microsoft/
+
+# Release planning / local notes
+PUBLISH-CHECKLIST.md
+marketplace-page.txt
 
 # Source maps
 *.map

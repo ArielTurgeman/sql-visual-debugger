@@ -87,6 +87,7 @@ module.exports = function runWebviewPanelTests(runTest, assert) {
 
   runTest('cte queries still render grouped roadmap buttons in the webview HTML', async () => {
     const { sendResult } = loadPanelModule();
+    const compiledPanelSource = fs.readFileSync(require.resolve('../out/webview/panel'), 'utf8');
     const panel = { webview: { html: '' } };
     const runner = new FakeRunner([
       {
@@ -137,10 +138,23 @@ module.exports = function runWebviewPanelTests(runTest, assert) {
     assert.match(panel.webview.html, /"blockType":"cte"/);
     assert.match(panel.webview.html, /"blockName":"active_users"/);
     assert.match(panel.webview.html, /"name":"WHERE"/);
+    assert.match(compiledPanelSource, /flowBlock flowBlock\\\$\{group\.blockType === 'cte' \? 'Cte' : group\.blockType === 'subquery' \? 'Subquery' : 'Main'\}/);
+    const renderBlockSummaryStart = compiledPanelSource.indexOf('function renderBlockSummary(step)');
+    const renderFlowBlocksStart = compiledPanelSource.indexOf('function renderFlowBlocks()');
+    const renderBlockSummarySource = compiledPanelSource.slice(renderBlockSummaryStart, renderFlowBlocksStart);
+    assert.equal(renderBlockSummaryStart >= 0, true);
+    assert.equal(renderFlowBlocksStart > renderBlockSummaryStart, true);
+    assert.doesNotMatch(renderBlockSummarySource, /const countLabel = matching\.length > breakdownRows\.length/);
+    assert.match(compiledPanelSource, /\.flowBlockCte/);
+    assert.match(compiledPanelSource, /\.flowBlockSubquery/);
+    assert.match(compiledPanelSource, /\.flowBlockMain/);
+    assert.equal(compiledPanelSource.includes('align-items: flex-start;'), true);
+    assert.equal(compiledPanelSource.includes('width: fit-content;'), true);
   });
 
   runTest('window detail rendering uses engine-provided preview rows instead of rebuilding from final step data only', () => {
     const { sendResult } = loadPanelModule();
+    const compiledPanelSource = fs.readFileSync(require.resolve('../out/webview/panel'), 'utf8');
     const panel = { webview: { html: '' } };
     sendResult(
       panel,
@@ -185,6 +199,55 @@ module.exports = function runWebviewPanelTests(runTest, assert) {
 
     assert.match(panel.webview.html, /meta\.previewRows/);
     assert.doesNotMatch(panel.webview.html, /const previewRows = \(step\.data \|\| \[\]\)\.map/);
+    assert.match(compiledPanelSource, /Click a highlighted window-function column name to see how it was computed\./);
+  });
+
+  runTest('case detail rendering advertises the clickable CASE result cells', () => {
+    const { sendResult } = loadPanelModule();
+    const compiledPanelSource = fs.readFileSync(require.resolve('../out/webview/panel'), 'utf8');
+    const panel = { webview: { html: '' } };
+    sendResult(
+      panel,
+      "SELECT CASE WHEN score >= 10 THEN 'high' ELSE 'low' END AS band FROM scores",
+      'case.sql',
+      'demo@localhost',
+      [
+        {
+          name: 'SELECT',
+          title: 'SELECT',
+          explanation: 'test',
+          sqlFragment: "SELECT CASE WHEN score >= 10 THEN 'high' ELSE 'low' END AS band",
+          rowsBefore: 2,
+          rowsAfter: 2,
+          data: [
+            { band: 'high' },
+            { band: 'low' },
+          ],
+          columns: ['band'],
+          caseColumns: [
+            {
+              outputColumn: 'band',
+              rowExplanations: [
+                {
+                  inputValues: [{ column: 'score', value: 12 }],
+                  matchedRule: 'score >= 10',
+                  returnedValue: 'high',
+                },
+                {
+                  inputValues: [{ column: 'score', value: 6 }],
+                  matchedRule: 'ELSE',
+                  returnedValue: 'low',
+                },
+              ],
+            },
+          ],
+        },
+      ],
+      'demo',
+      ['demo'],
+    );
+
+    assert.match(compiledPanelSource, /Click a highlighted CASE WHEN result cell to see why that value was returned\./);
   });
 
   runTest('joined ORDER BY columns keep sort highlight classes in the rendered table logic', () => {

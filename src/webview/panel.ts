@@ -207,14 +207,10 @@ function renderApp(input: { sql: string; source: string; connectionLabel: string
         const deps = Array.isArray(step.blockDependencies) && step.blockDependencies.length > 0
           ? \`<div class="blockDeps">Depends on: \${escapeHtml(step.blockDependencies.join(', '))}</div>\`
           : '';
-        const countLabel = matching.length > breakdownRows.length
-          ? \`Showing \${formatNumber(breakdownRows.length)} of \${formatNumber(matching.length)} row(s) <span class="truncatedHint">(display limit reached)</span>\`
-          : \`\${matching.length} row\${matching.length === 1 ? '' : 's'} contributed to this group\`;
 
         return \`
           <div class="blockSummary">
             <span class="blockBadge \${step.blockType === 'cte' ? 'cteBadge' : step.blockType === 'subquery' ? 'subqueryBadge' : 'mainBadge'}">\${escapeHtml(step.blockType === 'cte' ? 'CTE Block' : step.blockType === 'subquery' ? 'Subquery Block' : 'Main Query')}</span>
-            <span class="blockName">\${escapeHtml(formatBlockLabel(step))}</span>
             \${deps}
           </div>
           <div class="groupedFlowShell">\${renderFlowBlocks()}</div>\`;
@@ -227,7 +223,7 @@ function renderApp(input: { sql: string; source: string; connectionLabel: string
         const showGroupLabels = hasNestedQueryContext();
 
         return groups.map(group => \`
-          <div class="flowBlock \${group.key === activeKey ? 'activeBlock' : ''}">
+          <div class="flowBlock flowBlock\${group.blockType === 'cte' ? 'Cte' : group.blockType === 'subquery' ? 'Subquery' : 'Main'} \${group.key === activeKey ? 'activeBlock' : ''}">
             \${showGroupLabels ? \`<div class="flowBlockLabel">\${escapeHtml(group.blockType === 'cte' ? \`CTE \${group.cteNumber}: \${group.blockName}\` : group.blockType === 'subquery' ? \`SUBQUERY \${group.subqueryNumber}: \${group.blockName}\` : 'MAIN QUERY')}</div>\` : ''}
             <div class="flowBlockNodes">
               \${group.steps.map(({ step, idx }) => \`<button type="button" class="flowNode flowNodeBtn \${idx === currentStepIndex ? "active" : ""}" data-step-index="\${idx}">\${escapeHtml(step.title || step.name)}</button>\`).join(\`<span class="arrow">ג†’</span>\`)}
@@ -1068,7 +1064,10 @@ function renderApp(input: { sql: string; source: string; connectionLabel: string
           ? \`<div class="aggHint"><span class="aggHintLabel">Aggregations</span>\${escapeHtml(step.aggSummary)}</div>\`
           : '';
         const windowHint = step.name === 'SELECT' && windowColMap.size > 0
-          ? '<div class="windowHint">Click a window-function column name to see how it was computed.</div>'
+          ? '<div class="windowHint">Click a highlighted window-function column name to see how it was computed.</div>'
+          : '';
+        const caseHint = step.name === 'SELECT' && caseColSet.size > 0
+          ? '<div class="windowHint">Click a highlighted CASE WHEN result cell to see why that value was returned.</div>'
           : '';
 
         // Breakdown container rendered as a sibling card below the grouped table.
@@ -1088,6 +1087,7 @@ function renderApp(input: { sql: string; source: string; connectionLabel: string
             <div class="sectionTitle">Intermediate result <span class="subtle">\${step.data.length < step.rowsAfter ? \`Showing \${formatNumber(step.data.length)} of \${formatNumber(step.rowsAfter)}\` : formatNumber(step.data.length)} row(s)\${step.data.length < step.rowsAfter ? ' <span class="truncatedHint">(display limit reached)</span>' : ''}</span></div>
             \${aggHint}
             \${windowHint}
+            \${caseHint}
             \${isGroupByStep ? '<div class="groupClickHint">Click a <span class="groupDot"></span> row to expand its source rows</div>' : ''}
             <div class="tableWrap resultWrap" id="intermediateTableWrap">
               <table>
@@ -1361,24 +1361,55 @@ function styles(): string {
       margin-bottom: 10px;
       display: flex;
       flex-direction: column;
-      gap: 8px;
+      align-items: flex-start;
+      gap: 10px;
     }
     .flowBlock {
-      padding: 0;
-      background: transparent;
-      border: none;
-      border-radius: 0;
+      display: inline-flex;
+      flex-direction: column;
+      align-items: flex-start;
+      width: fit-content;
+      max-width: 100%;
+      padding: 10px 12px;
+      background: rgba(24, 29, 68, 0.92);
+      border: 1px solid rgba(77, 91, 164, 0.62);
+      border-radius: 12px;
+      box-shadow:
+        inset 0 1px 0 rgba(255,255,255,.03),
+        0 6px 18px rgba(0,0,0,.14);
+    }
+    .flowBlockCte {
+      background: rgba(24, 29, 68, 0.92);
+    }
+    .flowBlockSubquery {
+      background: rgba(24, 29, 68, 0.92);
+    }
+    .flowBlockMain {
+      background: rgba(24, 29, 68, 0.92);
     }
     .flowBlockLabel {
-      font-size: 10px;
+      display: inline-flex;
+      align-items: center;
+      padding: 2px 8px;
+      border-radius: 999px;
+      border: none;
+      background: transparent;
+      font-size: 9px;
       font-weight: 700;
-      letter-spacing: 0.05em;
+      letter-spacing: 0.07em;
       text-transform: uppercase;
-      color: var(--muted);
-      margin-bottom: 6px;
+      color: #dbe5ff;
+      margin-bottom: 8px;
+    }
+    .activeBlock {
+      background: rgba(34, 40, 88, 0.96);
+      box-shadow:
+        inset 0 1px 0 rgba(255,255,255,.04),
+        0 10px 22px rgba(0,0,0,.2);
     }
     .activeBlock .flowBlockLabel {
       color: var(--text);
+      background: transparent;
     }
     .flowBlockNodes {
       display: flex;

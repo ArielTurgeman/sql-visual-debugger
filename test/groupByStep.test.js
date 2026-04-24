@@ -82,4 +82,45 @@ module.exports = function runGroupByStepTests(runTest, assert) {
     ]);
     assert.match(groupStep.explanation, /Collapsed 3 rows into 2 groups by team_id/i);
   });
+
+  runTest('GROUP BY keeps the full pre-group source rows for breakdown filtering', async () => {
+    const largeRows = Array.from({ length: 650 }, (_, idx) => ({
+      continent: idx < 600 ? 'Asia' : 'Europe',
+      amount: idx + 1,
+    }));
+
+    const runner = new FakeRunner([
+      {
+        ...sqlIncludes('select `countries`.* from countries'),
+        rows: largeRows,
+      },
+      {
+        ...sqlIncludes('select continent, count(*) as country_count from countries group by continent'),
+        rows: [
+          { continent: 'Asia', country_count: 600 },
+          { continent: 'Europe', country_count: 50 },
+        ],
+      },
+    ]);
+
+    const steps = await executeDebugSteps(
+      'SELECT continent, COUNT(*) AS country_count FROM countries GROUP BY continent',
+      runner,
+    );
+
+    const groupStep = steps.find(step => step.name === 'GROUP BY');
+    if (!groupStep) {
+      throw new Error('Expected a GROUP BY step but none was produced.');
+    }
+
+    assert.equal(groupStep.preGroupRows.length, 650);
+    assert.equal(
+      groupStep.preGroupRows.filter(row => row.continent === 'Asia').length,
+      600,
+    );
+    assert.equal(
+      groupStep.preGroupRows.filter(row => row.continent === 'Europe').length,
+      50,
+    );
+  });
 };

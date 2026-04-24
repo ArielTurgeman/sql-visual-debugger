@@ -1,170 +1,109 @@
 # SQL Visual Debugger
 
-SQL Visual Debugger is a VS Code extension for stepping through supported MySQL `SELECT` queries clause by clause and inspecting the intermediate result at each stage.
+Why did this query return these rows?
 
-It is designed for read-only debugging and learning flows. Instead of treating SQL as a black box, the extension shows how rows change as the query moves through `FROM`, `JOIN`, `WHERE`, `GROUP BY`, `HAVING`, `SELECT`, `ORDER BY`, and `LIMIT`.
+SQL Visual Debugger helps you step through supported MySQL `SELECT` queries in SQL execution order and inspect the intermediate result after each stage inside VS Code.
 
-## Why Use It
+It is built for read-only debugging of supported MySQL query flows in v1.
 
-- Understand why rows were added, removed, grouped, sorted, or transformed
-- Debug row-count surprises and unexpected join results
-- Inspect intermediate result tables instead of only the final output
-- Learn SQL execution flow visually inside VS Code
+![SQL Visual Debugger overview](./images/marketplace/where.png)
 
-## Core Features
+## How It Works
 
-- Debug the selected query or the query under the cursor
-- Step through the query one stage at a time
-- Show intermediate result tables for each supported clause
-- Highlight the active SQL clause in the editor
-- Explain what changed between one step and the next
-- Re-run the same query after switching databases
-- Keep the debugger panel open beside the editor for side-by-side inspection
+Open a `.sql` file, select a query or place your cursor inside one, then right-click and choose `SQL Debugger: Debug Query`.
 
-## Supported SQL In V1
+The extension opens a debugger panel and walks through the query step by step in SQL execution order, so you can see what happened at each stage instead of only seeing the final result.
 
-V1 is intentionally narrow. The goal is to support a clear, trustworthy subset of MySQL query shapes rather than claim broad coverage.
+## What It Helps You Understand
 
-Supported query patterns currently include:
+- `FROM` - see the starting row set before later steps change it
+- `JOIN` - understand how rows matched across tables and why row counts changed
+- `WHERE` - see which rows were filtered out and why
+- `GROUP BY` - see how rows were grouped and which rows contributed to each group
+- `HAVING` - see which grouped rows were removed after aggregation
+- `SELECT` - understand the final projected columns and derived values
+- `DISTINCT` - see which duplicate rows were removed at the deduplication stage
+- `ORDER BY` - see how the final result was sorted
+- `LIMIT` - see where the result was truncated
+- `CASE` - understand how conditional output values were chosen
+- `Window Functions` - inspect supported ranking and windowed calculations with extra context
+- `WITH` CTEs - follow supported non-recursive CTE flows as part of the execution path
+- `FROM` subqueries - understand how supported derived tables feed the outer query
+- `WHERE IN` subqueries - inspect supported subquery-based filtering
+- scalar subqueries in `WHERE` - understand supported subquery comparisons in filters
 
-- `SELECT`
+## See What The JOIN Did
+
+When a query joins tables, the debugger shows both sides of the join, the join condition, the row-count change, and the joined result.
+
+This makes it much easier to understand why rows matched, duplicated, or disappeared.
+
+![JOIN step](./images/marketplace/join.png)
+
+## See How GROUP BY Changes The Data
+
+For supported grouped queries, the debugger shows the grouped output and lets you inspect the rows that contributed to each group.
+
+This helps explain aggregation instead of making it feel like a black box.
+
+![GROUP BY step](./images/marketplace/group-by.png)
+
+## See What WHERE Removed
+
+For supported filters, the debugger shows rows before and after `WHERE`, so you can see exactly what was removed and why.
+
+![WHERE step](./images/marketplace/where.png)
+
+## What V1 Supports
+
+SQL Visual Debugger currently supports supported MySQL debugging flows built around:
+
 - `FROM`
 - `JOIN`
-  - `INNER JOIN`
-  - `LEFT JOIN`
-  - `RIGHT JOIN`
-  - `CROSS JOIN`
-  - simple equality `ON` conditions
 - `WHERE`
 - `GROUP BY`
 - `HAVING`
+- `SELECT`
+- `DISTINCT`
 - `ORDER BY`
 - `LIMIT`
-- `DISTINCT`
 - non-recursive `WITH` CTEs
-- simple subqueries in `FROM (...) alias`
-- simple uncorrelated aggregate scalar subqueries in the `SELECT` list
-- `CASE` expressions in `SELECT`
+- simple `FROM (...) alias` subqueries
+- supported `WHERE IN (...)` subqueries
+- supported scalar subqueries in `WHERE`
+- supported `CASE` expressions
 - supported window functions in `SELECT`
+- simple uncorrelated aggregate scalar subqueries in the `SELECT` list
 
-## Current Limitations
+## Not Supported Yet
 
-This extension does not attempt to support every SQL feature. It is better to reject an unsupported query than to show misleading debug output.
+V1 is intentionally narrow. It does not try to support all SQL.
 
-Current limitations include:
+Examples of unsupported or currently limited areas include:
 
-- only `SELECT`-style debugging flows are supported
-- support is focused on MySQL in v1
-- v1 supports local MySQL connections only
-- remote hosts are blocked in v1
-- recursive CTEs are not supported
-- `JOIN` conditions must currently be simple equality comparisons
-- not every subquery shape is supported
-- projected scalar subqueries are currently limited to simple uncorrelated single-value aggregate forms such as `AVG`, `SUM`, `COUNT`, `MIN`, and `MAX`
-- some advanced window syntax is not yet supported
-- some query shapes may be rejected if they cannot be handled safely in the extension's read-only execution model
+- `UNION`
+- recursive CTEs
+- non-`SELECT` statements such as `INSERT`, `UPDATE`, and `DELETE`
+- remote MySQL hosts
+- non-equality join conditions
+- many advanced subquery shapes
+- correlated scalar subqueries in the `SELECT` list
+- grouped scalar subqueries in the `SELECT` list
+- some advanced window-function syntax
 
-When a query is outside the supported shape, the extension should fail with a clear message instead of silently producing misleading output.
+When a query is out of scope, the extension should stop with a clear message instead of pretending to debug it.
 
-## Safety And Trust Model
+## Safety And Trust
 
-The extension is intended for read-only debugging flows.
+SQL Visual Debugger is built for read-only debugging.
 
-In v1, SQL Visual Debugger:
+In v1 it:
 
+- supports local MySQL connections only
 - allows supported read-only `SELECT` and non-recursive `WITH` flows
 - blocks non-read-only query shapes
 - blocks unsupported query shapes instead of guessing
-- enforces local-only MySQL connections in v1
-- keeps safety checks in the execution path, not only in surface-level query parsing
+- keeps passwords only in session memory
+- clears cached passwords after access-denied failures so the next attempt prompts again
 
-This is not a general-purpose SQL runner. It is a bounded debugger for supported, read-only query analysis.
-
-## Connection Behavior
-
-- the extension is currently focused on MySQL only
-- v1 allows only local MySQL hosts such as `localhost`, `127.0.0.1`, and `::1`
-- server details and active database are stored separately
-- the extension can detect the active database from:
-  - `USE database_name;`
-  - inline annotations such as `-- @db: my_database`
-  - supported SQL extension APIs when available
-- the debugger can re-run the same query after you switch databases
-
-## Password Handling
-
-- passwords are kept only in session memory
-- passwords are not stored as durable extension configuration
-- after access-denied failures, cached passwords are cleared so the next attempt prompts again
-
-## How To Use
-
-1. Open a `.sql` file in VS Code.
-2. Select a query, or place the cursor inside a query.
-3. Run `SQL Debugger: Debug Query` from the editor context menu or Command Palette.
-4. Enter local MySQL connection details when prompted.
-5. Step through the query in the debugger panel.
-
-## Commands
-
-- `SQL Debugger: Debug Query`
-- `SQL Debugger: Configure Connection`
-- `SQL Debugger: Switch Database`
-
-## What The Debugger Shows
-
-### JOIN
-
-- preview both sides of the join
-- trace matching records through join keys
-- show relationship hints such as one-to-many or many-to-one
-- preserve duplicate column names using qualified labels when needed
-
-### WHERE and HAVING
-
-- show which rows survived the filter
-- show pre-filter rows for comparison
-- highlight the columns involved in the condition
-- show extra context for supported subquery-based filters
-
-### GROUP BY
-
-- show grouped output rows
-- inspect which source rows formed each group
-- highlight grouping columns
-- surface aggregate columns and summaries
-
-### SELECT and ORDER BY
-
-- show projected output columns
-- explain `DISTINCT` behavior when used
-- surface `CASE` expression details
-- surface supported window-function details and previews
-- highlight sort columns in `ORDER BY`
-
-## Development
-
-### Requirements
-
-- Node.js
-- npm
-- VS Code
-- access to a local MySQL database for manual testing
-
-### Install dependencies
-
-```bash
-npm install
-```
-
-### Compile
-
-```bash
-npm run compile
-```
-
-### Run tests
-
-```bash
-npm run test:unit
-```
+This is not a general-purpose SQL runner. It is a focused debugger for supported MySQL query analysis.
