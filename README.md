@@ -4,17 +4,39 @@ Why did this query return these rows?
 
 SQL Visual Debugger helps you step through supported MySQL `SELECT` queries in SQL execution order and inspect the intermediate result after each stage inside VS Code.
 
+Instead of only showing the final output, it helps you see how rows were loaded, joined, filtered, grouped, deduplicated, sorted, limited, and otherwise transformed through the query.
+
 It is built for read-only debugging of supported MySQL query flows in v1.
 
-![SQL Visual Debugger overview](https://raw.githubusercontent.com/ArielTurgeman/sql-visual-debugger/main/images/marketplace/fullscreen.png)
+<img src="https://raw.githubusercontent.com/ArielTurgeman/sql-visual-debugger/main/images/marketplace/where.png" alt="SQL Visual Debugger WHERE step" width="430" />
 
 ## How It Works
 
 Open a `.sql` file, select a query or place your cursor inside one, then right-click and choose `SQL Debugger: Debug Query`.
 
-The extension opens a debugger panel and walks through the query step by step in SQL execution order, so you can see what happened at each stage instead of only seeing the final result.
+The extension prompts for local MySQL connection details when needed, then opens a debugger panel and walks through the query step by step in SQL execution order.
 
-![Right-click to debug](https://raw.githubusercontent.com/ArielTurgeman/sql-visual-debugger/main/images/marketplace/rightclick.png)
+That means you can inspect what happened at each stage instead of only seeing the final result.
+
+<img src="https://raw.githubusercontent.com/ArielTurgeman/sql-visual-debugger/main/images/marketplace/rightclick.png" alt="Right-click to debug a query" width="430" />
+
+## See What The JOIN Did
+
+When a query joins tables, the debugger shows both sides of the join, the join condition, the row-count change, and the joined result.
+
+This makes it much easier to understand why rows matched, duplicated, or disappeared.
+
+<img src="https://raw.githubusercontent.com/ArielTurgeman/sql-visual-debugger/main/images/marketplace/join.png" alt="JOIN debugging example" width="430" />
+
+## See How GROUP BY Changes The Data
+
+For supported grouped queries, the debugger shows the grouped output and lets you inspect the rows that contributed to each group.
+
+This helps explain aggregation instead of making it feel like a black box.
+
+<img src="https://raw.githubusercontent.com/ArielTurgeman/sql-visual-debugger/main/images/marketplace/groupby.png" alt="GROUP BY debugging example" width="430" />
+
+SQL Visual Debugger also helps you inspect filtering, projection, deduplication, sorting, limits, supported CTE flows, supported subqueries, and more.
 
 ## What It Helps You Understand
 
@@ -33,28 +55,6 @@ The extension opens a debugger panel and walks through the query step by step in
 - `FROM` subqueries - understand how supported derived tables feed the outer query
 - `WHERE IN` subqueries - inspect supported subquery-based filtering
 - scalar subqueries in `WHERE` - understand supported subquery comparisons in filters
-
-## See What The JOIN Did
-
-When a query joins tables, the debugger shows both sides of the join, the join condition, the row-count change, and the joined result.
-
-This makes it much easier to understand why rows matched, duplicated, or disappeared.
-
-![JOIN step](https://raw.githubusercontent.com/ArielTurgeman/sql-visual-debugger/main/images/marketplace/joinfullscreen.png)
-
-## See How GROUP BY Changes The Data
-
-For supported grouped queries, the debugger shows the grouped output and lets you inspect the rows that contributed to each group.
-
-This helps explain aggregation instead of making it feel like a black box.
-
-![GROUP BY step](https://raw.githubusercontent.com/ArielTurgeman/sql-visual-debugger/main/images/marketplace/fullscreen.png)
-
-## See What WHERE Removed
-
-For supported filters, the debugger shows rows before and after `WHERE`, so you can see exactly what was removed and why.
-
-![WHERE step](https://raw.githubusercontent.com/ArielTurgeman/sql-visual-debugger/main/images/marketplace/fullscreen.png)
 
 ## What V1 Supports
 
@@ -109,13 +109,3 @@ In v1 it:
 - clears cached passwords after access-denied failures so the next attempt prompts again
 
 This is not a general-purpose SQL runner. It is a focused debugger for supported MySQL query analysis.
-
-## Simple Connection Flow
-
-In v1, SQL Visual Debugger supports local MySQL connections only.
-
-When needed, the extension prompts for connection details inside VS Code and keeps the flow simple.
-
-![Local MySQL host prompt](https://raw.githubusercontent.com/ArielTurgeman/sql-visual-debugger/main/images/marketplace/localhost.png)
-
-![Password prompt](https://raw.githubusercontent.com/ArielTurgeman/sql-visual-debugger/main/images/marketplace/password.png)
