@@ -8,7 +8,7 @@ Instead of only showing the final output, it helps you see how rows were loaded,
 
 It is built for read-only debugging of supported MySQL query flows in v1.
 
-<img src="https://raw.githubusercontent.com/ArielTurgeman/sql-visual-debugger/main/images/marketplace/where.png" alt="SQL Visual Debugger WHERE step" width="430" />
+<img src="https://raw.githubusercontent.com/ArielTurgeman/sql-visual-debugger/main/images/marketplace/where-v2.png" alt="SQL Visual Debugger WHERE step" width="430" />
 
 ## How It Works
 
@@ -18,7 +18,7 @@ The extension prompts for local MySQL connection details when needed, then opens
 
 That means you can inspect what happened at each stage instead of only seeing the final result.
 
-<img src="https://raw.githubusercontent.com/ArielTurgeman/sql-visual-debugger/main/images/marketplace/rightclick.png" alt="Right-click to debug a query" width="430" />
+<img src="https://raw.githubusercontent.com/ArielTurgeman/sql-visual-debugger/main/images/marketplace/rightclick-v2.png" alt="Right-click to debug a query" width="430" />
 
 ## See What The JOIN Did
 
@@ -26,7 +26,7 @@ When a query joins tables, the debugger shows both sides of the join, the join c
 
 This makes it much easier to understand why rows matched, duplicated, or disappeared.
 
-<img src="https://raw.githubusercontent.com/ArielTurgeman/sql-visual-debugger/main/images/marketplace/join.png" alt="JOIN debugging example" width="430" />
+<img src="https://raw.githubusercontent.com/ArielTurgeman/sql-visual-debugger/main/images/marketplace/join-v2.png" alt="JOIN debugging example" width="430" />
 
 ## See How GROUP BY Changes The Data
 
@@ -34,7 +34,7 @@ For supported grouped queries, the debugger shows the grouped output and lets yo
 
 This helps explain aggregation instead of making it feel like a black box.
 
-<img src="https://raw.githubusercontent.com/ArielTurgeman/sql-visual-debugger/main/images/marketplace/groupby.png" alt="GROUP BY debugging example" width="430" />
+<img src="https://raw.githubusercontent.com/ArielTurgeman/sql-visual-debugger/main/images/marketplace/groupby-v2.png" alt="GROUP BY debugging example" width="430" />
 
 SQL Visual Debugger also helps you inspect filtering, projection, deduplication, sorting, limits, supported CTE flows, supported subqueries, and more.
 
