@@ -6,13 +6,15 @@ SQL Visual Debugger helps you step through supported MySQL `SELECT` queries in S
 
 It is built for read-only debugging of supported MySQL query flows in v1.
 
-![SQL Visual Debugger overview](./images/marketplace/where.png)
+![SQL Visual Debugger overview](https://raw.githubusercontent.com/ArielTurgeman/sql-visual-debugger/main/images/marketplace/fullscreen.png)
 
 ## How It Works
 
 Open a `.sql` file, select a query or place your cursor inside one, then right-click and choose `SQL Debugger: Debug Query`.
 
 The extension opens a debugger panel and walks through the query step by step in SQL execution order, so you can see what happened at each stage instead of only seeing the final result.
+
+![Right-click to debug](https://raw.githubusercontent.com/ArielTurgeman/sql-visual-debugger/main/images/marketplace/rightclick.png)
 
 ## What It Helps You Understand
 
@@ -38,7 +40,7 @@ When a query joins tables, the debugger shows both sides of the join, the join c
 
 This makes it much easier to understand why rows matched, duplicated, or disappeared.
 
-![JOIN step](./images/marketplace/join.png)
+![JOIN step](https://raw.githubusercontent.com/ArielTurgeman/sql-visual-debugger/main/images/marketplace/joinfullscreen.png)
 
 ## See How GROUP BY Changes The Data
 
@@ -46,13 +48,13 @@ For supported grouped queries, the debugger shows the grouped output and lets yo
 
 This helps explain aggregation instead of making it feel like a black box.
 
-![GROUP BY step](./images/marketplace/group-by.png)
+![GROUP BY step](https://raw.githubusercontent.com/ArielTurgeman/sql-visual-debugger/main/images/marketplace/fullscreen.png)
 
 ## See What WHERE Removed
 
 For supported filters, the debugger shows rows before and after `WHERE`, so you can see exactly what was removed and why.
 
-![WHERE step](./images/marketplace/where.png)
+![WHERE step](https://raw.githubusercontent.com/ArielTurgeman/sql-visual-debugger/main/images/marketplace/fullscreen.png)
 
 ## What V1 Supports
 
@@ -107,3 +109,13 @@ In v1 it:
 - clears cached passwords after access-denied failures so the next attempt prompts again
 
 This is not a general-purpose SQL runner. It is a focused debugger for supported MySQL query analysis.
+
+## Simple Connection Flow
+
+In v1, SQL Visual Debugger supports local MySQL connections only.
+
+When needed, the extension prompts for connection details inside VS Code and keeps the flow simple.
+
+![Local MySQL host prompt](https://raw.githubusercontent.com/ArielTurgeman/sql-visual-debugger/main/images/marketplace/localhost.png)
+
+![Password prompt](https://raw.githubusercontent.com/ArielTurgeman/sql-visual-debugger/main/images/marketplace/password.png)
