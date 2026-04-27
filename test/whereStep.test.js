@@ -143,6 +143,58 @@ module.exports = function runWhereStepTests(runTest, assert) {
     assert.equal(whereStep.whereInSubquery.totalRows, 2);
   });
 
+  runTest('WHERE NOT IN subqueries use the inverse explanation text', async () => {
+    const runner = new FakeRunner([
+      {
+        ...sqlIncludes('select `users`.* from users'),
+        rows: [
+          { id: 1, team_id: 10, name: 'Ada' },
+          { id: 2, team_id: 20, name: 'Linus' },
+          { id: 3, team_id: 30, name: 'Grace' },
+        ],
+      },
+      {
+        ...sqlIncludes('select team_id from banned_teams'),
+        rows: [
+          { team_id: 20 },
+        ],
+      },
+      {
+        ...sqlIncludes('where team_id not in (select team_id from banned_teams)'),
+        rows: [
+          { id: 1, team_id: 10, name: 'Ada' },
+          { id: 3, team_id: 30, name: 'Grace' },
+        ],
+      },
+      {
+        ...sqlIncludes('select id, team_id, name from users where team_id not in (select team_id from banned_teams)'),
+        rows: [
+          { id: 1, team_id: 10, name: 'Ada' },
+          { id: 3, team_id: 30, name: 'Grace' },
+        ],
+      },
+    ]);
+
+    const steps = await executeDebugSteps(
+      'SELECT id, team_id, name FROM users WHERE team_id NOT IN (SELECT team_id FROM banned_teams)',
+      runner,
+    );
+
+    const whereStep = steps.find(step => step.name === 'WHERE');
+    if (!whereStep) {
+      throw new Error('Expected a WHERE step but none was produced.');
+    }
+
+    assert.ok(whereStep.whereInSubquery);
+    assert.equal(
+      whereStep.whereInSubquery.explanation,
+      'Filters rows by keeping team_id values that do not appear in the values returned by the subquery.',
+    );
+    assert.deepEqual(whereStep.whereInSubquery.rows, [
+      { team_id: 20 },
+    ]);
+  });
+
   runTest('WHERE scalar subqueries expose comparison metadata', async () => {
     const runner = new FakeRunner([
       {

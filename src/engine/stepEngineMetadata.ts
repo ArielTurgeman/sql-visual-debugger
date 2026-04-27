@@ -57,7 +57,9 @@ export async function buildWhereInSubqueryMeta(
 
   const rows = await runCustomSelect(parsed.subquerySql);
   return {
-    explanation: `Filters rows by checking whether ${parsed.outerColumn ? bareIdentifier(parsed.outerColumn) : 'value'} exists in the values returned by the subquery.`,
+    explanation: parsed.negated
+      ? `Filters rows by keeping ${parsed.outerColumn ? bareIdentifier(parsed.outerColumn) : 'value'} values that do not appear in the values returned by the subquery.`
+      : `Filters rows by checking whether ${parsed.outerColumn ? bareIdentifier(parsed.outerColumn) : 'value'} exists in the values returned by the subquery.`,
     rows: rows.slice(0, MAX_DISPLAY_ROWS),
     columns: getColumns(rows),
     totalRows: rows.length,
@@ -295,7 +297,7 @@ export async function detectCaseColumns(
   }));
 }
 
-function parseWhereInSubquery(whereClause: string): { outerColumn?: string; subquerySql: string } | null {
+function parseWhereInSubquery(whereClause: string): { outerColumn?: string; subquerySql: string; negated: boolean } | null {
   const clause = whereClause.replace(/^WHERE\s+/i, '').trim();
   let depth = 0;
   let i = 0;
@@ -328,9 +330,12 @@ function parseWhereInSubquery(whereClause: string): { outerColumn?: string; subq
         i += 1;
         continue;
       }
+      const beforeIn = clause.slice(0, i).trim();
+      const negated = /\bNOT\s*$/i.test(beforeIn);
       return {
-        outerColumn: extractTrailingIdentifier(clause.slice(0, i).trim()) ?? undefined,
+        outerColumn: extractTrailingIdentifier(beforeIn.replace(/\bNOT\s*$/i, '').trim()) ?? undefined,
         subquerySql: innerSql,
+        negated,
       };
     }
     i += 1;
