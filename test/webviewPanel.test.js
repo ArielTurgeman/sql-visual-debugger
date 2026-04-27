@@ -206,6 +206,52 @@ module.exports = function runWebviewPanelTests(runTest, assert) {
     assert.match(compiledPanelSource, /Click a highlighted window-function column name to see how it was computed\./);
   });
 
+  runTest('distinct detail groups rows with typed fingerprints so NULL and empty string stay distinct', () => {
+    const { sendResult } = loadPanelModule();
+    const compiledPanelSource = fs.readFileSync(require.resolve('../out/webview/panel'), 'utf8');
+    const panel = { webview: { html: '' } };
+
+    sendResult(
+      panel,
+      'SELECT DISTINCT code FROM qa_code_values ORDER BY code',
+      'distinct-null.sql',
+      'demo@localhost',
+      [
+        {
+          name: 'SELECT',
+          title: 'SELECT',
+          explanation: 'test',
+          sqlFragment: 'SELECT DISTINCT code',
+          rowsBefore: 4,
+          rowsAfter: 3,
+          data: [
+            { code: null },
+            { code: '' },
+            { code: 'A' },
+          ],
+          columns: ['code'],
+          distinctMeta: {
+            columns: ['code'],
+            rows: [
+              { code: null },
+              { code: '' },
+              { code: 'A' },
+              { code: '' },
+            ],
+          },
+        },
+      ],
+      'demo',
+      ['demo'],
+    );
+
+    assert.match(compiledPanelSource, /function buildTypedRowFingerprint\(row, columns\)/);
+    assert.match(compiledPanelSource, /if \(value === null\) return 'null';/);
+    assert.match(compiledPanelSource, /if \(typeof value === 'string'\) return \\`string:\\\$\{value\}\\`;/);
+    assert.match(compiledPanelSource, /const groupedRows = Array\.from\(groupMap\.values\(\)\);/);
+    assert.doesNotMatch(compiledPanelSource, /const fingerprint = cols\.map\(c => String\(row\[c\] \?\? ''\)\)\.join/);
+  });
+
   runTest('case detail rendering advertises the clickable CASE result cells', () => {
     const { sendResult } = loadPanelModule();
     const compiledPanelSource = fs.readFileSync(require.resolve('../out/webview/panel'), 'utf8');
@@ -292,6 +338,7 @@ module.exports = function runWebviewPanelTests(runTest, assert) {
 
   runTest('join UI uses the specific join type in roadmap and preview text', () => {
     const { sendResult } = loadPanelModule();
+    const compiledPanelSource = fs.readFileSync(require.resolve('../out/webview/panel'), 'utf8');
     const panel = { webview: { html: '' } };
     sendResult(
       panel,
@@ -340,6 +387,9 @@ module.exports = function runWebviewPanelTests(runTest, assert) {
     assert.match(panel.webview.html, /describeJoinType\(jm\.joinType, jm\.leftTable, jm\.rightTable\)/);
     assert.match(panel.webview.html, /LEFT JOIN'/);
     assert.match(panel.webview.html, /function describeJoinType\(joinType, leftTable, rightTable\)/);
+    assert.match(compiledPanelSource, /function getJoinComparableKey\(value\)/);
+    assert.match(compiledPanelSource, /const matches  = joinIsNull \|\| joinComparableKey === null/);
+    assert.match(compiledPanelSource, /getJoinComparableKey\(r\[joinKey\]\) === joinComparableKey/);
   });
 
   runTest('filtered view summary uses actual WHERE totals instead of the capped preview length', () => {

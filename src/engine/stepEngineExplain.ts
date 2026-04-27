@@ -99,7 +99,10 @@ export function buildJoinDisplay(
 
   const rightIndex = new Map<string, number[]>();
   rightRows.forEach((row, index) => {
-    const key = String(row[rightKeyCol] ?? '');
+    const key = buildJoinKey(row[rightKeyCol]);
+    if (key === null) {
+      return;
+    }
     const bucket = rightIndex.get(key);
     if (bucket) bucket.push(index);
     else rightIndex.set(key, [index]);
@@ -109,7 +112,13 @@ export function buildJoinDisplay(
   const matchedRightSet = new Set<number>();
 
   for (const leftRow of leftRows) {
-    const leftKey = String(leftRow[leftKeyCol] ?? '');
+    const leftKey = buildJoinKey(leftRow[leftKeyCol]);
+    if (leftKey === null) {
+      if (isLeft) {
+        result.push(mergeRow(leftRow, null));
+      }
+      continue;
+    }
     const matchIndexes = rightIndex.get(leftKey) ?? [];
     if (matchIndexes.length > 0) {
       for (const index of matchIndexes) {
@@ -198,9 +207,21 @@ function compareUnknown(left: unknown, right: unknown): number {
 function hasDuplicates(rows: Record<string, unknown>[], key: string): boolean {
   const seen = new Set<string>();
   for (const row of rows) {
-    const value = String(row[key] ?? '');
+    const value = buildJoinKey(row[key]);
+    if (value === null) {
+      continue;
+    }
     if (seen.has(value)) return true;
     seen.add(value);
   }
   return false;
+}
+
+function buildJoinKey(value: unknown): string | null {
+  if (value === null || value === undefined) {
+    return null;
+  }
+  return typeof value === 'string'
+    ? `str:${value}`
+    : `${typeof value}:${String(value)}`;
 }

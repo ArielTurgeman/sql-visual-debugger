@@ -336,6 +336,87 @@ module.exports = function runJoinStepTests(runTest, assert) {
     assert.deepEqual(joinStep.columns, ['id', 'team_id', 'name', 't.id', 't.team_id', 'label']);
   });
 
+  runTest('INNER JOIN does not match NULL join keys to NULL or empty-string keys', async () => {
+    const runner = new FakeRunner([
+      {
+        ...sqlIncludes('select `l`.* from qa_join_left l'),
+        rows: [
+          { id: 1, ref_code: null },
+          { id: 2, ref_code: '' },
+          { id: 3, ref_code: 'A' },
+        ],
+      },
+      {
+        ...sqlIncludes('select `r`.* from qa_join_right r'),
+        rows: [
+          { id: 10, ref_code: null },
+          { id: 11, ref_code: '' },
+          { id: 12, ref_code: 'A' },
+        ],
+      },
+      {
+        ...sqlIncludes('select l.id as left_id, l.ref_code as left_ref_code, r.id as right_id, r.ref_code as right_ref_code from qa_join_left l inner join qa_join_right r on l.ref_code = r.ref_code'),
+        rows: [
+          { left_id: 2, left_ref_code: '', right_id: 11, right_ref_code: '' },
+          { left_id: 3, left_ref_code: 'A', right_id: 12, right_ref_code: 'A' },
+        ],
+      },
+    ]);
+
+    const steps = await executeDebugSteps(
+      'SELECT l.id AS left_id, l.ref_code AS left_ref_code, r.id AS right_id, r.ref_code AS right_ref_code FROM qa_join_left l INNER JOIN qa_join_right r ON l.ref_code = r.ref_code',
+      runner,
+    );
+
+    const joinStep = steps.find(step => step.name === 'JOIN');
+    if (!joinStep) throw new Error('Expected a JOIN step but none was produced.');
+
+    assert.equal(joinStep.rowsBefore, 3);
+    assert.equal(joinStep.rowsAfter, 2);
+    assert.deepEqual(joinStep.data, [
+      { id: 2, ref_code: '', 'r.id': 11, 'r.ref_code': '' },
+      { id: 3, ref_code: 'A', 'r.id': 12, 'r.ref_code': 'A' },
+    ]);
+    assert.equal(joinStep.joinMeta.relationship, 'one-to-one');
+  });
+
+  runTest('JOIN relationship inference ignores NULL keys but still treats empty strings as real duplicates', async () => {
+    const runner = new FakeRunner([
+      {
+        ...sqlIncludes('select `l`.* from qa_join_left l'),
+        rows: [
+          { id: 1, ref_code: null },
+          { id: 2, ref_code: '' },
+          { id: 3, ref_code: '' },
+        ],
+      },
+      {
+        ...sqlIncludes('select `r`.* from qa_join_right r'),
+        rows: [
+          { id: 10, ref_code: '' },
+        ],
+      },
+      {
+        ...sqlIncludes('select l.id, r.id from qa_join_left l inner join qa_join_right r on l.ref_code = r.ref_code'),
+        rows: [
+          { id: 2, 'r.id': 10 },
+          { id: 3, 'r.id': 10 },
+        ],
+      },
+    ]);
+
+    const steps = await executeDebugSteps(
+      'SELECT l.id, r.id FROM qa_join_left l INNER JOIN qa_join_right r ON l.ref_code = r.ref_code',
+      runner,
+    );
+
+    const joinStep = steps.find(step => step.name === 'JOIN');
+    if (!joinStep) throw new Error('Expected a JOIN step but none was produced.');
+
+    assert.equal(joinStep.joinMeta.relationship, 'many-to-one');
+    assert.equal(joinStep.rowsAfter, 2);
+  });
+
   runTest('unsupported non-equality JOIN conditions are rejected clearly', async () => {
     const runner = new FakeRunner([]);
 

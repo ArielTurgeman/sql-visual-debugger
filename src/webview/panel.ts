@@ -374,10 +374,11 @@ function renderApp(input: { sql: string; source: string; connectionLabel: string
       function buildPreviewRowsHtml(rows, columns, joinKey, side) {
         return rows.map((row, rowIdx) => {
           const joinValue = row[joinKey];
+          const joinComparableKey = getJoinComparableKey(joinValue);
           const cells = columns.map(col =>
             \`<td\${col === joinKey ? ' class="joinCell"' : ''}>\${renderCellValue(row[col])}</td>\`
           ).join('');
-          return \`<tr data-side="\${side}" data-row-index="\${rowIdx}" data-join-value="\${escapeAttr(joinValue)}">\${cells}</tr>\`;
+          return \`<tr data-side="\${side}" data-row-index="\${rowIdx}" data-join-value="\${escapeAttr(joinValue)}" data-join-key="\${escapeAttr(joinComparableKey ?? '')}" data-join-null="\${joinComparableKey === null ? '1' : '0'}">\${cells}</tr>\`;
         }).join('');
       }
 
@@ -398,6 +399,27 @@ function renderApp(input: { sql: string; source: string; connectionLabel: string
           </div>\`;
       }
 
+      function getJoinComparableKey(value) {
+        if (value === null || value === undefined) {
+          return null;
+        }
+        return typeof value === 'string'
+          ? \`str:\${value}\`
+          : \`\${typeof value}:\${String(value)}\`;
+      }
+
+      function buildTypedRowFingerprint(row, columns) {
+        return columns.map((column) => {
+          const value = row[column];
+          if (value === null) return 'null';
+          if (value === undefined) return 'undefined';
+          if (typeof value === 'string') return \`string:\${value}\`;
+          if (typeof value === 'number') return \`number:\${value}\`;
+          if (typeof value === 'boolean') return \`boolean:\${value}\`;
+          return \`\${typeof value}:\${String(value)}\`;
+        }).join('\x00');
+      }
+
       function bindJoinClicks(step) {
         if (!step.joinMeta) return;
         const jm = step.joinMeta;
@@ -406,6 +428,7 @@ function renderApp(input: { sql: string; source: string; connectionLabel: string
         // Track which side + value is currently selected (null = no selection).
         let activeSide  = null;
         let activeValue = null;
+        let activeNull  = false;
 
         // ── DOM helpers ────────────────────────────────────────────────────────
         function getPane(side) {
@@ -441,15 +464,15 @@ function renderApp(input: { sql: string; source: string; connectionLabel: string
           setFilterBar(side, null);
         }
 
-        // Replace the other pane with only the rows that match joinValue.
-        function filterPane(side, joinValue) {
+        // Replace the other pane with only the rows that match the selected comparable join key.
+        function filterPane(side, joinComparableKey, joinIsNull) {
           const pane     = getPane(side);
           const allRows  = side === 'left' ? jm.allLeftRows  : jm.allRightRows;
           const cols     = side === 'left' ? jm.leftColumns  : jm.rightColumns;
           const joinKey  = side === 'left' ? jm.leftKeyCol   : jm.rightKeyCol;
-          const strVal   = String(joinValue ?? '');
-
-          const matches  = allRows.filter(r => String(r[joinKey] ?? '') === strVal);
+          const matches  = joinIsNull || joinComparableKey === null
+            ? []
+            : allRows.filter(r => getJoinComparableKey(r[joinKey]) === joinComparableKey);
           const total    = matches.length;
           const display  = matches.slice(0, MAX_PREVIEW);
 
@@ -473,6 +496,7 @@ function renderApp(input: { sql: string; source: string; connectionLabel: string
         function resetBoth() {
           activeSide  = null;
           activeValue = null;
+          activeNull  = false;
           resetPane('left');
           resetPane('right');
         }
@@ -481,10 +505,12 @@ function renderApp(input: { sql: string; source: string; connectionLabel: string
         function handleRowClick(tr) {
           const side      = tr.dataset.side;
           const joinValue = tr.dataset.joinValue;
+          const joinKey   = tr.dataset.joinKey ?? '';
+          const joinIsNull = tr.dataset.joinNull === '1';
           const otherSide = side === 'left' ? 'right' : 'left';
 
           // Clicking the same value again → deselect and reset.
-          if (activeSide === side && activeValue === String(joinValue ?? '')) {
+          if (activeSide === side && activeValue === joinKey && activeNull === joinIsNull) {
             resetBoth();
             return;
           }
@@ -494,15 +520,18 @@ function renderApp(input: { sql: string; source: string; connectionLabel: string
           resetPane('right');
 
           activeSide  = side;
-          activeValue = String(joinValue ?? '');
+          activeValue = joinKey;
+          activeNull  = joinIsNull;
 
           // Highlight the clicked row (and any sibling with the same join value) in source pane.
           getPane(side)?.querySelectorAll(\`tr[data-side="\${side}"]\`).forEach(r => {
-            if (r.dataset.joinValue === activeValue) r.classList.add('selectedRow');
+            if (r.dataset.joinKey === activeValue && (r.dataset.joinNull === '1') === activeNull) {
+              r.classList.add('selectedRow');
+            }
           });
 
           // Filter the other pane.
-          filterPane(otherSide, joinValue);
+          filterPane(otherSide, joinKey, joinIsNull);
         }
 
         // ── Event delegation — one listener per pane, covers all current/future rows ──
@@ -964,7 +993,7 @@ function renderApp(input: { sql: string; source: string; connectionLabel: string
         const groupMap = new Map();
 
         rows.forEach((row) => {
-          const fingerprint = cols.map(c => String(row[c] ?? '')).join('\x00');
+          const fingerprint = buildTypedRowFingerprint(row, cols);
           const existing = groupMap.get(fingerprint);
           if (existing) {
             existing.push(row);
@@ -973,10 +1002,10 @@ function renderApp(input: { sql: string; source: string; connectionLabel: string
           }
         });
 
-        const duplicateGroups = Array.from(groupMap.values()).filter(groupRows => groupRows.length > 1);
+        const groupedRows = Array.from(groupMap.values());
         const headerHtml = cols.map(c => \`<th>\${escapeHtml(c)}</th>\`).join('');
-        const bodyHtml = duplicateGroups.length > 0
-          ? duplicateGroups.map((groupRows) =>
+        const bodyHtml = groupedRows.length > 0
+          ? groupedRows.map((groupRows) =>
           groupRows.map((row, idx) => {
             const removed = idx > 0;
             const cells = cols.map(c => {
@@ -988,7 +1017,7 @@ function renderApp(input: { sql: string; source: string; connectionLabel: string
             return \`<tr\${removed ? ' style="opacity:.62;"' : ''}>\${cells}</tr>\`;
           }).join('')
         ).join('')
-          : \`<tr><td colspan="\${Math.max(cols.length, 1)}" class="noMatchCell">No duplicate selected rows were collapsed</td></tr>\`;
+          : \`<tr><td colspan="\${Math.max(cols.length, 1)}" class="noMatchCell">No selected rows available</td></tr>\`;
 
         return \`
           <div class="distinctDetailBlock">
