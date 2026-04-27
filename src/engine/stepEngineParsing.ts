@@ -43,7 +43,7 @@ export function buildFinalQuery(
 }
 
 export function parseSelectQuery(sql: string): ParsedQuery {
-  const cleaned = sql.replace(/\s+/g, ' ').trim().replace(/;$/, '');
+  const cleaned = normalizeSqlForParsing(sql);
   if (!/^SELECT\s+/i.test(cleaned)) {
     throw new Error('Only SELECT queries are supported in this MVP.');
   }
@@ -90,6 +90,59 @@ export function bareIdentifier(value: string): string {
 
 export function normalizeSqlFragment(value: string): string {
   return value.replace(/`/g, '').replace(/\s+/g, ' ').trim().toLowerCase();
+}
+
+export function normalizeSqlForParsing(value: string): string {
+  const withoutTrailingSemicolon = trimTrailingSemicolonOutsideQuotes(value);
+  let result = '';
+  let quote: '\'' | '"' | '`' | null = null;
+  let sawWhitespace = false;
+
+  for (let i = 0; i < withoutTrailingSemicolon.length; i += 1) {
+    const ch = withoutTrailingSemicolon[i];
+
+    if (quote) {
+      result += ch;
+      if (ch === quote) {
+        if ((quote === '\'' || quote === '"') && withoutTrailingSemicolon[i + 1] === quote) {
+          result += withoutTrailingSemicolon[i + 1];
+          i += 1;
+          continue;
+        }
+        let backslashCount = 0;
+        for (let j = i - 1; j >= 0 && withoutTrailingSemicolon[j] === '\\'; j -= 1) {
+          backslashCount += 1;
+        }
+        if (backslashCount % 2 === 0) {
+          quote = null;
+        }
+      }
+      continue;
+    }
+
+    if (ch === '\'' || ch === '"' || ch === '`') {
+      if (sawWhitespace && result.length > 0 && result[result.length - 1] !== ' ') {
+        result += ' ';
+      }
+      sawWhitespace = false;
+      quote = ch;
+      result += ch;
+      continue;
+    }
+
+    if (/\s/.test(ch)) {
+      sawWhitespace = true;
+      continue;
+    }
+
+    if (sawWhitespace && result.length > 0 && result[result.length - 1] !== ' ') {
+      result += ' ';
+    }
+    sawWhitespace = false;
+    result += ch;
+  }
+
+  return result.trim();
 }
 
 export function quoteSqlString(value: string): string {
@@ -243,6 +296,43 @@ export function skipQuotedSql(text: string, start: number, quote: string): numbe
   }
 
   throw new Error('Unterminated quoted string while parsing WHERE IN subquery.');
+}
+
+function trimTrailingSemicolonOutsideQuotes(value: string): string {
+  let end = value.length - 1;
+  let quote: '\'' | '"' | '`' | null = null;
+
+  while (end >= 0 && /\s/.test(value[end])) {
+    end -= 1;
+  }
+  if (end < 0) {
+    return '';
+  }
+
+  for (let i = 0; i <= end; i += 1) {
+    const ch = value[i];
+    if (quote) {
+      if (ch === quote) {
+        if ((quote === '\'' || quote === '"') && value[i + 1] === quote) {
+          i += 1;
+          continue;
+        }
+        let backslashCount = 0;
+        for (let j = i - 1; j >= 0 && value[j] === '\\'; j -= 1) {
+          backslashCount += 1;
+        }
+        if (backslashCount % 2 === 0) {
+          quote = null;
+        }
+      }
+      continue;
+    }
+    if (ch === '\'' || ch === '"' || ch === '`') {
+      quote = ch;
+    }
+  }
+
+  return value[end] === ';' ? value.slice(0, end).trimEnd() : value;
 }
 
 export function splitTopLevelSelectItems(selectBody: string): string[] {

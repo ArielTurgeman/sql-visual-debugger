@@ -1,4 +1,5 @@
 const { extractQuery, sanitizeSql } = require('../out/editor/queryExtractor');
+const { parseSelectQuery, normalizeSqlForParsing } = require('../out/engine/stepEngineParsing');
 
 function createEditor(text, options = {}) {
   const fileName = options.fileName ?? 'example.sql';
@@ -502,6 +503,71 @@ LIMIT 20;
     assert.throws(
       () => sanitizeSql('SELECT * FROM users; SELECT * FROM orders;'),
       /Only a single SQL statement is supported per debug run\./,
+    );
+  });
+
+  runTest('sanitizeSql preserves semicolons double spaces and comment markers inside quoted strings', () => {
+    const sql = `
+      SELECT
+        'A;B' AS code_value,
+        'needs  review' AS spaced_value,
+        'pre--launch' AS dashed_value,
+        'keep /* text */ here' AS comment_like_value
+      FROM city
+      LIMIT 1;
+    `;
+
+    assert.equal(
+      sanitizeSql(sql),
+      "SELECT 'A;B' AS code_value, 'needs  review' AS spaced_value, 'pre--launch' AS dashed_value, 'keep /* text */ here' AS comment_like_value FROM city LIMIT 1",
+    );
+  });
+
+  runTest('extractQuery allows quoted string contents that contain comment markers and repeated spaces', () => {
+    const sql = `
+      SELECT
+        ID,
+        Name,
+        District
+      FROM city
+      WHERE District = 'Southeast Asia'
+         OR District = 'needs  review'
+         OR Name = 'pre--launch'
+      ORDER BY Name;
+    `;
+
+    const result = extractQuery(createEditor(sql));
+
+    assert.ok(!('error' in result));
+    assert.equal(
+      result.sql,
+      "SELECT ID, Name, District FROM city WHERE District = 'Southeast Asia' OR District = 'needs  review' OR Name = 'pre--launch' ORDER BY Name",
+    );
+  });
+
+  runTest('parseSelectQuery preserves quoted literal contents while normalizing outer whitespace', () => {
+    const parsed = parseSelectQuery(`
+      SELECT
+        'A;B' AS code_value,
+        'needs  review' AS spaced_value,
+        'pre--launch' AS dashed_value
+      FROM city
+      WHERE Name = 'pre--launch'
+      ORDER BY Name;
+    `);
+
+    assert.equal(
+      parsed.selectClause,
+      "SELECT 'A;B' AS code_value, 'needs  review' AS spaced_value, 'pre--launch' AS dashed_value",
+    );
+    assert.equal(parsed.whereClause, "WHERE Name = 'pre--launch'");
+    assert.equal(parsed.orderByClause, 'ORDER BY Name');
+  });
+
+  runTest('normalizeSqlForParsing collapses whitespace only outside quoted strings', () => {
+    assert.equal(
+      normalizeSqlForParsing("SELECT  'needs  review'  AS value,  'pre--launch'  AS label  FROM city  "),
+      "SELECT 'needs  review' AS value, 'pre--launch' AS label FROM city",
     );
   });
 };

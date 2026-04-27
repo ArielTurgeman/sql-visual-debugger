@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 import type { ExtractResult } from '../types';
 import { parseQueryBlocks } from '../engine/queryBlocks';
-import { extractTableAliases, parseSelectQuery, splitTopLevelSelectItems } from '../engine/stepEngineParsing';
+import { extractTableAliases, normalizeSqlForParsing, parseSelectQuery, splitTopLevelSelectItems } from '../engine/stepEngineParsing';
 
 type StatementSlice = {
     start: number;
@@ -291,9 +291,7 @@ function splitStatements(text: string): StatementSlice[] {
 }
 
 function hasConsecutiveSemicolonTerminators(text: string): boolean {
-    const withoutComments = text
-        .replace(/\/\*[\s\S]*?\*\//g, ' ')
-        .replace(/--[^\n]*/g, '');
+    const withoutComments = stripSqlCommentsOutsideQuotes(text);
     const masked = maskQuotedContent(withoutComments);
     return /;\s*;/.test(masked);
 }
@@ -307,25 +305,17 @@ function hasConsecutiveSemicolonTerminators(text: string): boolean {
  * Throws on multi-statement input so the caller gets a clear error.
  */
 export function sanitizeSql(raw: string): string {
-    // Strip comments before any other processing so they don't interfere with
-    // the SELECT check or the semicolon guard.
-    //   - Block comments  /* ... */  may span multiple lines.
-    //   - Line comments   -- ...     run to the end of the line.
-    const withoutComments = raw
-        .replace(/\/\*[\s\S]*?\*\//g, ' ')
-        .replace(/--[^\n]*/g, '');
+    const withoutComments = stripSqlCommentsOutsideQuotes(raw);
+    const withoutTrailing = stripTrailingSemicolonOutsideQuotes(withoutComments);
 
-    // Strip trailing semicolon first, then check for embedded ones.
-    const withoutTrailing = withoutComments.trim().replace(/;\s*$/, '').trim();
-
-    if (withoutTrailing.includes(';')) {
+    if (hasSemicolonOutsideQuotes(withoutTrailing)) {
         throw new Error(
             'Only a single SQL statement is supported per debug run.\n' +
             'Remove the extra semicolon or select just one query.'
         );
     }
 
-    return withoutTrailing.replace(/\s+/g, ' ').trim();
+    return normalizeSqlForParsing(withoutTrailing);
 }
 
 function findUnsafeReadOnlyShape(sql: string): string | null {
@@ -752,4 +742,135 @@ function maskQuotedContent(sql: string): string {
     }
 
     return result;
+}
+
+function stripSqlCommentsOutsideQuotes(sql: string): string {
+    let result = '';
+    let i = 0;
+    let quote: '\'' | '"' | '`' | null = null;
+    let lineComment = false;
+    let blockComment = false;
+
+    while (i < sql.length) {
+        const char = sql[i];
+        const next = sql[i + 1];
+
+        if (lineComment) {
+            if (char === '\n') {
+                lineComment = false;
+                result += '\n';
+            }
+            i += 1;
+            continue;
+        }
+
+        if (blockComment) {
+            if (char === '*' && next === '/') {
+                blockComment = false;
+                i += 2;
+                result += ' ';
+                continue;
+            }
+            if (char === '\n') {
+                result += '\n';
+            }
+            i += 1;
+            continue;
+        }
+
+        if (quote) {
+            result += char;
+            if (char === quote) {
+                if ((quote === '\'' || quote === '"') && next === quote) {
+                    result += next;
+                    i += 2;
+                    continue;
+                }
+
+                let backslashCount = 0;
+                for (let j = i - 1; j >= 0 && sql[j] === '\\'; j -= 1) {
+                    backslashCount += 1;
+                }
+                if (backslashCount % 2 === 0) {
+                    quote = null;
+                }
+            }
+            i += 1;
+            continue;
+        }
+
+        if (char === '\'' || char === '"' || char === '`') {
+            quote = char;
+            result += char;
+            i += 1;
+            continue;
+        }
+
+        if (char === '-' && next === '-') {
+            lineComment = true;
+            i += 2;
+            continue;
+        }
+
+        if (char === '/' && next === '*') {
+            blockComment = true;
+            i += 2;
+            continue;
+        }
+
+        result += char;
+        i += 1;
+    }
+
+    return result;
+}
+
+function stripTrailingSemicolonOutsideQuotes(sql: string): string {
+    let end = sql.length - 1;
+    while (end >= 0 && /\s/.test(sql[end])) {
+        end -= 1;
+    }
+
+    if (end >= 0 && sql[end] === ';') {
+        return sql.slice(0, end).trimEnd();
+    }
+
+    return sql;
+}
+
+function hasSemicolonOutsideQuotes(sql: string): boolean {
+    let quote: '\'' | '"' | '`' | null = null;
+
+    for (let i = 0; i < sql.length; i += 1) {
+        const char = sql[i];
+        const next = sql[i + 1];
+
+        if (quote) {
+            if (char === quote) {
+                if ((quote === '\'' || quote === '"') && next === quote) {
+                    i += 1;
+                    continue;
+                }
+                let backslashCount = 0;
+                for (let j = i - 1; j >= 0 && sql[j] === '\\'; j -= 1) {
+                    backslashCount += 1;
+                }
+                if (backslashCount % 2 === 0) {
+                    quote = null;
+                }
+            }
+            continue;
+        }
+
+        if (char === '\'' || char === '"' || char === '`') {
+            quote = char;
+            continue;
+        }
+
+        if (char === ';') {
+            return true;
+        }
+    }
+
+    return false;
 }
