@@ -16,6 +16,8 @@ import {
   findMatchingParenSql,
   findNextTopLevelKeyword,
   matchesWordAt,
+  normalizeQualified,
+  normalizeSqlFragment,
   parseCaseExpression,
   parseWindowExpression,
   quoteSqlString,
@@ -33,13 +35,9 @@ import {
 type RunCustomSelect = (sql: string) => Promise<Record<string, unknown>[]>;
 type GetColumns = (rows: Record<string, unknown>[]) => string[];
 
-export function detectWhereColumns(whereClause: string, columns: string[]): string[] {
+export function detectWhereColumns(whereClause: string, columns: string[], schema?: ColumnDef[]): string[] {
   const clause = whereClause.replace(/^WHERE\s+/i, '');
-  return columns.filter(col => {
-    const bare = col.includes('.') ? col.split('.').pop()! : col;
-    const escaped = bare.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    return new RegExp(`\\b${escaped}\\b`, 'i').test(clause);
-  });
+  return resolveClauseReferences(extractIdentifierReferences(clause), columns, schema);
 }
 
 export async function buildWhereInSubqueryMeta(
@@ -98,13 +96,10 @@ export function detectHavingColumns(
   havingClause: string,
   selectClause: string,
   columns: string[],
+  schema?: ColumnDef[],
 ): string[] {
   const stripped = havingClause.replace(/^HAVING\s+/i, '');
-  const direct = columns.filter(col => {
-    const bare = col.includes('.') ? col.split('.').pop()! : col;
-    const escaped = bare.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    return new RegExp(`\\b${escaped}\\b`, 'i').test(stripped);
-  });
+  const direct = resolveClauseReferences(extractIdentifierReferences(stripped), columns, schema);
   if (direct.length > 0) return direct;
 
   const aggKey = (fn: string, inner: string): string =>
@@ -137,14 +132,7 @@ export function detectOrderByColumns(orderByClause: string, columns: string[], s
     .trim()
     .replace(/\s+(ASC|DESC)\s*$/i, '')
     .trim());
-  const matched = new Set<string>();
-
-  const directTerms = new Set(terms.map(term => bareIdentifier(term).toLowerCase()));
-  columns.forEach(col => {
-    if (directTerms.has(bareIdentifier(col).toLowerCase())) {
-      matched.add(col);
-    }
-  });
+  const matched = new Set(resolveClauseReferences(terms, columns));
 
   if (!selectClause) {
     return Array.from(matched);
@@ -155,16 +143,10 @@ export function detectOrderByColumns(orderByClause: string, columns: string[], s
     const aliasMatch = item.match(/^(.*?)(?:\s+AS\s+`?([A-Za-z_][A-Za-z0-9_]*)`?)$/i);
     const expr = (aliasMatch ? aliasMatch[1] : item).trim();
     const alias = aliasMatch?.[2];
-    if (!alias) continue;
-
-    const outputColumn = columns.find(col => bareIdentifier(col).toLowerCase() === alias.toLowerCase());
+    const outputColumn = resolveOutputColumnReference(alias, expr, columns);
     if (!outputColumn) continue;
 
-    const simpleColumnExpr = /^(?:`[^`]+`|[A-Za-z_][A-Za-z0-9_]*)(?:\.(?:`[^`]+`|[A-Za-z_][A-Za-z0-9_]*))?$/.test(expr);
-    if (!simpleColumnExpr) continue;
-
-    const sourceBare = bareIdentifier(expr).toLowerCase();
-    if (directTerms.has(sourceBare)) {
+    if (terms.some(term => referencesSameSqlExpression(term, expr))) {
       matched.add(outputColumn);
     }
   }
@@ -172,11 +154,29 @@ export function detectOrderByColumns(orderByClause: string, columns: string[], s
   return Array.from(matched);
 }
 
-export function detectGroupByColumns(groupByClause: string, columns: string[]): string[] {
+export function detectGroupByColumns(groupByClause: string, columns: string[], selectClause?: string): string[] {
   const body = groupByClause.replace(/^GROUP\s+BY\s+/i, '');
-  const terms = body.split(',').map(term => term.trim().replace(/`/g, '').split('.').pop()!.toLowerCase());
-  const termSet = new Set(terms);
-  return columns.filter(col => termSet.has((col.includes('.') ? col.split('.').pop()! : col).toLowerCase()));
+  const terms = splitTopLevelSelectItems(body).map(term => term.trim());
+  const matched = new Set(resolveClauseReferences(terms, columns));
+
+  if (!selectClause) {
+    return Array.from(matched);
+  }
+
+  const selectItems = splitTopLevelSelectItems(selectClause.replace(/^SELECT\s+/i, ''));
+  for (const item of selectItems) {
+    const aliasMatch = item.match(/^(.*?)(?:\s+AS\s+`?([A-Za-z_][A-Za-z0-9_]*)`?)$/i);
+    const expr = (aliasMatch ? aliasMatch[1] : item).trim();
+    const alias = aliasMatch?.[2];
+    const outputColumn = resolveOutputColumnReference(alias, expr, columns);
+    if (!outputColumn) continue;
+
+    if (terms.some(term => referencesSameSqlExpression(term, expr))) {
+      matched.add(outputColumn);
+    }
+  }
+
+  return Array.from(matched);
 }
 
 export function detectAggColumns(
@@ -191,7 +191,7 @@ export function detectAggColumns(
     const fn = match[1].toUpperCase();
     const arg = match[2].trim();
     const alias = match[3];
-    const srcCol = (arg === '*' || arg === '') ? undefined : arg.replace(/`/g, '').split('.').pop()!;
+    const srcCol = (arg === '*' || arg === '') ? undefined : normalizeQualified(arg);
     if (alias) {
       const col = columns.find(column => {
         const bare = (column.includes('.') ? column.split('.').pop()! : column).toLowerCase();
@@ -498,4 +498,89 @@ function buildWindowPreviewQuery(
   );
 
   return `${baseSql}${orderTerms.length > 0 ? ` ORDER BY ${orderTerms.join(', ')}` : ''}`;
+}
+
+function resolveClauseReferences(references: string[], columns: string[], schema?: ColumnDef[]): string[] {
+  const matched = new Set<string>();
+  const candidates = buildColumnCandidates(columns, schema);
+
+  for (const reference of references) {
+    const normalizedRef = normalizeQualified(reference).toLowerCase();
+    const bareRef = bareIdentifier(reference).toLowerCase();
+    if (!normalizedRef || !bareRef) continue;
+
+    const exactMatches = candidates.filter(candidate =>
+      candidate.normalizedDisplay === normalizedRef || candidate.normalizedSqlExpr === normalizedRef,
+    );
+    if (exactMatches.length > 0) {
+      exactMatches.forEach(candidate => matched.add(candidate.displayName));
+      continue;
+    }
+
+    const bareMatches = candidates.filter(candidate => candidate.bareDisplay === bareRef);
+    if (bareMatches.length === 1) {
+      matched.add(bareMatches[0].displayName);
+    }
+  }
+
+  return Array.from(matched);
+}
+
+function extractIdentifierReferences(clause: string): string[] {
+  const refs: string[] = [];
+  const seen = new Set<string>();
+  const keywordSet = new Set([
+    'AND', 'OR', 'NOT', 'IN', 'IS', 'NULL', 'LIKE', 'BETWEEN', 'EXISTS',
+    'SELECT', 'FROM', 'JOIN', 'ON', 'WHERE', 'GROUP', 'BY', 'HAVING', 'ORDER',
+    'LIMIT', 'ASC', 'DESC', 'AS', 'TRUE', 'FALSE',
+  ]);
+  const tokenRx = /(`[^`]+`(?:\.`[^`]+`)?|[A-Za-z_][A-Za-z0-9_]*(?:\.(?:`[^`]+`|[A-Za-z_][A-Za-z0-9_]*))?)/g;
+  let match: RegExpExecArray | null;
+
+  while ((match = tokenRx.exec(clause)) !== null) {
+    const token = match[1];
+    const bare = bareIdentifier(token);
+    const nextChar = clause.slice(match.index + token.length).trimStart()[0];
+    if (keywordSet.has(bare.toUpperCase())) continue;
+    if (nextChar === '(') continue;
+    const normalized = normalizeQualified(token).toLowerCase();
+    if (!normalized || seen.has(normalized)) continue;
+    seen.add(normalized);
+    refs.push(token);
+  }
+
+  return refs;
+}
+
+function referencesSameSqlExpression(left: string, right: string): boolean {
+  return normalizeQualified(left).toLowerCase() === normalizeQualified(right).toLowerCase();
+}
+
+function resolveOutputColumnReference(alias: string | undefined, expr: string, columns: string[]): string | undefined {
+  if (alias) {
+    const matchedAlias = columns.find(col => bareIdentifier(col).toLowerCase() === alias.toLowerCase());
+    if (matchedAlias) {
+      return matchedAlias;
+    }
+  }
+
+  const normalizedExpr = normalizeSqlFragment(expr);
+  return columns.find(col => normalizeSqlFragment(col) === normalizedExpr);
+}
+
+function buildColumnCandidates(columns: string[], schema?: ColumnDef[]): Array<{
+  displayName: string;
+  normalizedDisplay: string;
+  normalizedSqlExpr: string;
+  bareDisplay: string;
+}> {
+  return columns.map(column => {
+    const schemaEntry = schema?.find(entry => entry.displayName.toLowerCase() === column.toLowerCase());
+    return {
+      displayName: column,
+      normalizedDisplay: normalizeQualified(column).toLowerCase(),
+      normalizedSqlExpr: normalizeQualified(schemaEntry?.sqlExpr ?? column).toLowerCase(),
+      bareDisplay: bareIdentifier(column).toLowerCase(),
+    };
+  });
 }

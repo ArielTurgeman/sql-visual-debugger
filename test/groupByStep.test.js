@@ -123,4 +123,61 @@ module.exports = function runGroupByStepTests(runTest, assert) {
       50,
     );
   });
+
+  runTest('GROUP BY preserves qualified aggregate source columns when different tables share the same bare name', async () => {
+    const runner = new FakeRunner([
+      {
+        ...sqlIncludes('select `co`.* from country co'),
+        rows: [
+          { Code: 'IND', Continent: 'Asia', Population: 1000000 },
+          { Code: 'PAK', Continent: 'Asia', Population: 900000 },
+        ],
+      },
+      {
+        ...sqlIncludes('select `ci`.* from city ci'),
+        rows: [
+          { Id: 1, Population: 500000, CountryCode: 'IND' },
+          { Id: 2, Population: 300000, CountryCode: 'IND' },
+          { Id: 3, Population: 400000, CountryCode: 'PAK' },
+        ],
+      },
+      {
+        ...sqlIncludes('group by co.continent'),
+        rows: [
+          { Continent: 'Asia', avg_city_population: 400000, biggest_city_population: 500000 },
+        ],
+      },
+      {
+        ...sqlIncludes('select co.continent, avg(ci.population) as avg_city_population, max(ci.population) as biggest_city_population'),
+        rows: [
+          { Continent: 'Asia', avg_city_population: 400000, biggest_city_population: 500000 },
+        ],
+      },
+      {
+        ...sqlIncludes('where co.population >= 900000'),
+        rows: [
+          { Code: 'IND', Continent: 'Asia', Population: 1000000, Id: 1, 'ci.Population': 500000, CountryCode: 'IND' },
+          { Code: 'IND', Continent: 'Asia', Population: 1000000, Id: 2, 'ci.Population': 300000, CountryCode: 'IND' },
+          { Code: 'PAK', Continent: 'Asia', Population: 900000, Id: 3, 'ci.Population': 400000, CountryCode: 'PAK' },
+        ],
+      },
+    ]);
+
+    const steps = await executeDebugSteps(
+      'SELECT co.Continent, AVG(ci.Population) AS avg_city_population, MAX(ci.Population) AS biggest_city_population FROM country co INNER JOIN city ci ON co.Code = ci.CountryCode WHERE co.Population >= 900000 GROUP BY co.Continent',
+      runner,
+    );
+
+    const groupStep = steps.find(step => step.name === 'GROUP BY');
+    if (!groupStep) {
+      throw new Error('Expected a GROUP BY step but none was produced.');
+    }
+
+    assert.deepEqual(groupStep.groupByColumns, ['Continent']);
+    assert.deepEqual(groupStep.aggColumns, [
+      { col: 'avg_city_population', fn: 'AVG', srcCol: 'ci.Population' },
+      { col: 'biggest_city_population', fn: 'MAX', srcCol: 'ci.Population' },
+    ]);
+    assert.deepEqual(groupStep.preGroupColumns, ['Code', 'Continent', 'Population', 'Id', 'ci.Population', 'CountryCode']);
+  });
 };

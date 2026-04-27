@@ -196,7 +196,7 @@ async function executeSingleQueryBlockSteps(
     const before = currentRows.length;
     const preFilterRows = currentRows.slice(0, 200);
     const preFilterColumns = getColumns(currentRows);
-    const whereColumns = detectWhereColumns(parsed.whereClause, preFilterColumns);
+    const whereColumns = detectWhereColumns(parsed.whereClause, preFilterColumns, canonicalSchema);
     const whereInSubquery = await buildWhereInSubqueryMeta(parsed.whereClause, currentFromSql, runner, runBlockSelect, getColumns);
     const whereScalarSubquery = await buildWhereScalarSubqueryMeta(parsed.whereClause, currentFromSql, runner, runBlockSelect, getColumns);
     const rows = await runBlockSelect(buildCanonicalQuery(canonicalSchema, currentFromSql, parsed.whereClause));
@@ -234,7 +234,7 @@ async function executeSingleQueryBlockSteps(
       groupedCols,
       groupKeys: parsed.groupByClause.replace(/^GROUP\s+BY\s+/i, '').trim(),
       sqlFragment: parsed.groupByClause,
-      groupByColumns: detectGroupByColumns(parsed.groupByClause, groupedCols),
+      groupByColumns: detectGroupByColumns(parsed.groupByClause, groupedCols, parsed.selectClause),
       aggColumns: detectAggColumns(parsed.selectClause, groupedCols),
       aggSummary: buildAggSummary(parsed.selectClause) || undefined,
       preGroupRows: currentRows,
@@ -257,7 +257,7 @@ async function executeSingleQueryBlockSteps(
       sqlFragment: parsed.havingClause,
       preFilterRows,
       preFilterColumns,
-      whereColumns: detectHavingColumns(parsed.havingClause, parsed.selectClause, preFilterColumns),
+      whereColumns: detectHavingColumns(parsed.havingClause, parsed.selectClause, preFilterColumns, canonicalSchema),
     }));
     currentRows = rows;
   }

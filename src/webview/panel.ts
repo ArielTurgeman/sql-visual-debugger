@@ -532,9 +532,8 @@ function renderApp(input: { sql: string; source: string; connectionLabel: string
         const preCols   = step.preGroupColumns || (preRows.length > 0 ? Object.keys(preRows[0]) : []);
         const breakdownLimit = 200;
         const groupMappings = (step.groupByColumns || []).map((groupCol) => {
-          const bareGroupCol = getBareColumnName(groupCol);
-          const sourceColumn = preCols.find((col) => getBareColumnName(col) === bareGroupCol) || null;
-          const outputColumn = (step.columns || []).find((col) => getBareColumnName(col) === bareGroupCol) || groupCol;
+          const sourceColumn = resolveColumnReference(preCols, groupCol);
+          const outputColumn = resolveColumnReference(step.columns || [], groupCol) || groupCol;
           return { sourceColumn, outputColumn };
         }).filter((mapping) => mapping.sourceColumn && mapping.outputColumn);
 
@@ -562,17 +561,21 @@ function renderApp(input: { sql: string; source: string; connectionLabel: string
         const aggSrcMap = new Map();
         (step.aggColumns || []).forEach(a => {
           if (a.srcCol) {
-            const bare = a.srcCol.includes('.') ? a.srcCol.split('.').pop() : a.srcCol;
-            aggSrcMap.set(bare.toLowerCase(), a.fn);
+            const resolvedSource = resolveColumnReference(preCols, a.srcCol);
+            if (!resolvedSource) return;
+            const existingFns = aggSrcMap.get(resolvedSource) || [];
+            if (!existingFns.includes(a.fn)) {
+              existingFns.push(a.fn);
+            }
+            aggSrcMap.set(resolvedSource, existingFns);
           }
         });
 
         const headerHtml = preCols.map(c => {
-          const bare  = (c.includes('.') ? c.split('.').pop() : c).toLowerCase();
-          const aggFn = aggSrcMap.get(bare);
+          const aggFns = aggSrcMap.get(c);
           // Aggregation source column: violet tint header + reuse existing .aggBadge pill.
-          if (aggFn) {
-            return \`<th class="bdAggSrcHead" data-column-name="\${escapeAttr(c)}">\${escapeHtml(c)}<span class="aggBadge">\${escapeHtml(aggFn)}</span></th>\`;
+          if (aggFns && aggFns.length > 0) {
+            return \`<th class="bdAggSrcHead" data-column-name="\${escapeAttr(c)}">\${escapeHtml(c)}\${aggFns.map(fn => \`<span class="aggBadge">\${escapeHtml(fn)}</span>\`).join('')}</th>\`;
           }
           // All other columns (including GROUP BY key) are plain — the breakdown's job is to
           // highlight the calculation source, not to re-emphasise the grouping key.
@@ -582,8 +585,7 @@ function renderApp(input: { sql: string; source: string; connectionLabel: string
         const breakdownRows = matching.slice(0, breakdownLimit);
         const bodyHtml = breakdownRows.map(row =>
           \`<tr>\${preCols.map(c => {
-            const bare  = (c.includes('.') ? c.split('.').pop() : c).toLowerCase();
-            const isAgg = aggSrcMap.has(bare);
+            const isAgg = aggSrcMap.has(c);
             return \`<td\${isAgg ? ' class="bdAggSrcCell"' : ''}>\${renderCellValue(row[c])}</td>\`;
           }).join('')}</tr>\`
         ).join('');
@@ -685,13 +687,23 @@ function renderApp(input: { sql: string; source: string; connectionLabel: string
           meta.orderByTerms.length > 0 ? \`Order by: \${orderMeta}\` : null
         ].filter(Boolean).join(' • ');
 
-        const previewRows = ((meta.previewRows || []).length > 0 ? meta.previewRows : (step.data || [])).map(row => {
+        const visibleColumns = new Set((step.columns || []).map(col => String(col).toLowerCase()));
+        const canUseVisibleRows = previewColumns.every(col => visibleColumns.has(String(col).toLowerCase()));
+        const previewSourceRows = canUseVisibleRows
+          ? (step.data || [])
+          : ((meta.previewRows || []).length > 0 ? meta.previewRows : (step.data || []));
+        const previewRows = previewSourceRows.map(row => {
           const preview = {};
           previewColumns.forEach(col => {
             preview[col] = row[col];
           });
           return preview;
         });
+        const previewScopeNote = canUseVisibleRows && step.data.length < step.rowsAfter
+          ? \`Preview follows the \${formatNumber(step.data.length)} visible row(s) shown above. Additional partition changes may be outside the current display limit.\`
+          : !canUseVisibleRows && (meta.previewRows || []).length > 0
+            ? 'Preview includes supporting partition/order columns that are not visible in the intermediate result.'
+            : '';
 
         const partitionKeys = [];
         for (const row of previewRows) {
@@ -716,6 +728,7 @@ function renderApp(input: { sql: string; source: string; connectionLabel: string
             <div class="sectionTitle">Window function preview</div>
             <div class="windowSummaryLine">\${escapeHtml(summary)}</div>
             \${metaLine ? \`<div class="windowMetaLine">\${escapeHtml(metaLine)}</div>\` : ''}
+            \${previewScopeNote ? \`<div class="windowHint">\${escapeHtml(previewScopeNote)}</div>\` : ''}
             <div class="tableWrap breakdownWrap">
               <table>
                 <thead><tr>\${previewHeader}</tr></thead>
@@ -1150,32 +1163,51 @@ function renderApp(input: { sql: string; source: string; connectionLabel: string
         return parts[parts.length - 1];
       }
 
+      function resolveColumnReference(columns, target) {
+        if (!Array.isArray(columns) || columns.length === 0) {
+          return null;
+        }
+
+        const normalizedTarget = normalizeColumnName(target);
+        const bareTarget = getBareColumnName(target);
+        if (!normalizedTarget) {
+          return null;
+        }
+
+        const exactMatch = columns.find((column) => normalizeColumnName(column) === normalizedTarget);
+        if (exactMatch) {
+          return exactMatch;
+        }
+
+        const bareMatches = columns.filter((column) => getBareColumnName(column) === bareTarget);
+        if (bareMatches.length === 1) {
+          return bareMatches[0];
+        }
+
+        return null;
+      }
+
       function findRelevantHeader(wrapper, columns) {
         if (!wrapper || !Array.isArray(columns) || columns.length === 0) {
           return null;
         }
 
-        const normalizedTargets = columns
-          .map((column) => ({
-            full: normalizeColumnName(column),
-            bare: getBareColumnName(column),
-          }))
-          .filter((target) => target.full);
+        const headers = Array.from(wrapper.querySelectorAll('thead th'));
+        const headerNames = headers.map(header => header.getAttribute('data-column-name') || header.textContent || '');
 
-        if (normalizedTargets.length === 0) {
-          return null;
+        for (const column of columns) {
+          const resolvedHeaderName = resolveColumnReference(headerNames, column);
+          if (!resolvedHeaderName) continue;
+          const resolvedHeader = headers.find((header) => {
+            const headerName = header.getAttribute('data-column-name') || header.textContent || '';
+            return normalizeColumnName(headerName) === normalizeColumnName(resolvedHeaderName);
+          });
+          if (resolvedHeader) {
+            return resolvedHeader;
+          }
         }
 
-        const headers = Array.from(wrapper.querySelectorAll('thead th'));
-        return headers.find((header) => {
-          const headerName = header.getAttribute('data-column-name') || header.textContent || '';
-          const normalizedHeader = normalizeColumnName(headerName);
-          const bareHeader = getBareColumnName(headerName);
-
-          return normalizedTargets.some((target) =>
-            target.full === normalizedHeader || target.bare === bareHeader
-          );
-        }) || null;
+        return null;
       }
 
       function scrollHeaderIntoView(wrapper, header) {

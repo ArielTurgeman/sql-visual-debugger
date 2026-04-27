@@ -191,4 +191,48 @@ module.exports = function runWhereStepTests(runTest, assert) {
     assert.equal(whereStep.whereScalarSubquery.value, 24);
     assert.equal(whereStep.whereScalarSubquery.columnLabel, 'avg_age');
   });
+
+  runTest('WHERE highlights only the qualified duplicate column that is actually referenced', async () => {
+    const runner = new FakeRunner([
+      {
+        ...sqlIncludes('select `co`.* from country co'),
+        rows: [
+          { Code: 'IND', Name: 'India', Population: 1000000 },
+          { Code: 'PAK', Name: 'Pakistan', Population: 900000 },
+        ],
+      },
+      {
+        ...sqlIncludes('select `ci`.* from city ci'),
+        rows: [
+          { Name: 'Mumbai', Population: 900000, CountryCode: 'IND' },
+          { Name: 'Karachi', Population: 800000, CountryCode: 'PAK' },
+        ],
+      },
+      {
+        ...sqlIncludes('where co.population >= 1000000'),
+        rows: [
+          { Code: 'IND', Name: 'India', Population: 1000000, 'ci.Name': 'Mumbai', 'ci.Population': 900000, CountryCode: 'IND' },
+        ],
+      },
+      {
+        ...sqlIncludes('select co.name as country_name, ci.name as city_name from country co inner join city ci on co.code = ci.countrycode where co.population >= 1000000'),
+        rows: [
+          { country_name: 'India', city_name: 'Mumbai' },
+        ],
+      },
+    ]);
+
+    const steps = await executeDebugSteps(
+      'SELECT co.Name AS country_name, ci.Name AS city_name FROM country co INNER JOIN city ci ON co.Code = ci.CountryCode WHERE co.Population >= 1000000',
+      runner,
+    );
+
+    const whereStep = steps.find(step => step.name === 'WHERE');
+    if (!whereStep) {
+      throw new Error('Expected a WHERE step but none was produced.');
+    }
+
+    assert.deepEqual(whereStep.preFilterColumns, ['Code', 'Name', 'Population', 'ci.Name', 'ci.Population', 'CountryCode']);
+    assert.deepEqual(whereStep.whereColumns, ['Population']);
+  });
 };

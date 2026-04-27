@@ -72,7 +72,7 @@ module.exports = function runOrderByStepTests(runTest, assert) {
     assert.deepEqual(steps.map(step => step.name), ['FROM', 'SELECT', 'ORDER BY']);
     assert.equal(orderStep.rowsBefore, 3);
     assert.equal(orderStep.rowsAfter, 3);
-    assert.deepEqual(orderStep.sortColumns, ['id', 'score']);
+    assert.deepEqual(orderStep.sortColumns, ['score', 'id']);
     assert.deepEqual(orderStep.data, [
       { id: 3, score: 95, name: 'Grace' },
       { id: 1, score: 80, name: 'Ada' },
@@ -148,5 +148,58 @@ module.exports = function runOrderByStepTests(runTest, assert) {
 
     assert.deepEqual(orderStep.columns, ['Population', 'hopa']);
     assert.deepEqual(orderStep.sortColumns, ['Population', 'hopa']);
+  });
+
+  runTest('ORDER BY does not highlight same-named columns from the wrong table alias', async () => {
+    const runner = new FakeRunner([
+      {
+        ...sqlIncludes('select `ci`.* from city ci'),
+        rows: [
+          { Name: 'Mumbai', Population: 10500000, CountryCode: 'IND' },
+          { Name: 'Karachi', Population: 9269265, CountryCode: 'PAK' },
+        ],
+      },
+      {
+        ...sqlIncludes('select `co`.* from country co'),
+        rows: [
+          { Code: 'IND', Name: 'India', Continent: 'Asia' },
+          { Code: 'PAK', Name: 'Pakistan', Continent: 'Asia' },
+        ],
+      },
+      {
+        ...sqlIncludes("order by ci.population desc, ci.name"),
+        rows: [
+          { city_name: 'Mumbai', city_population: 10500000, country_name: 'India', Continent: 'Asia' },
+          { city_name: 'Karachi', city_population: 9269265, country_name: 'Pakistan', Continent: 'Asia' },
+        ],
+      },
+      {
+        ...sqlIncludes("select ci.name as city_name, ci.population as city_population, co.name as country_name, co.continent from city ci inner join country co on ci.countrycode = co.code where co.continent = 'asia'"),
+        rows: [
+          { city_name: 'Mumbai', city_population: 10500000, country_name: 'India', Continent: 'Asia' },
+          { city_name: 'Karachi', city_population: 9269265, country_name: 'Pakistan', Continent: 'Asia' },
+        ],
+      },
+      {
+        ...sqlIncludes("where co.continent = 'asia'"),
+        rows: [
+          { Name: 'Mumbai', Population: 10500000, CountryCode: 'IND', 'co.Name': 'India', Continent: 'Asia', Code: 'IND' },
+          { Name: 'Karachi', Population: 9269265, CountryCode: 'PAK', 'co.Name': 'Pakistan', Continent: 'Asia', Code: 'PAK' },
+        ],
+      },
+    ]);
+
+    const steps = await executeDebugSteps(
+      "SELECT ci.Name AS city_name, ci.Population AS city_population, co.Name AS country_name, co.Continent FROM city ci INNER JOIN country co ON ci.CountryCode = co.Code WHERE co.Continent = 'Asia' ORDER BY ci.Population DESC, ci.Name",
+      runner,
+    );
+
+    const orderStep = steps.find(step => step.name === 'ORDER BY');
+    if (!orderStep) {
+      throw new Error('Expected an ORDER BY step but none was produced.');
+    }
+
+    assert.deepEqual(orderStep.columns, ['city_name', 'city_population', 'country_name', 'Continent']);
+    assert.deepEqual(orderStep.sortColumns, ['city_name', 'city_population']);
   });
 };

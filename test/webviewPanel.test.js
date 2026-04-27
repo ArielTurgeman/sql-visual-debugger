@@ -152,7 +152,7 @@ module.exports = function runWebviewPanelTests(runTest, assert) {
     assert.equal(compiledPanelSource.includes('width: fit-content;'), true);
   });
 
-  runTest('window detail rendering uses engine-provided preview rows instead of rebuilding from final step data only', () => {
+  runTest('window detail rendering prefers visible intermediate rows and falls back to engine preview rows when needed', () => {
     const { sendResult } = loadPanelModule();
     const compiledPanelSource = fs.readFileSync(require.resolve('../out/webview/panel'), 'utf8');
     const panel = { webview: { html: '' } };
@@ -197,8 +197,12 @@ module.exports = function runWebviewPanelTests(runTest, assert) {
       ['demo'],
     );
 
-    assert.match(panel.webview.html, /meta\.previewRows/);
-    assert.doesNotMatch(panel.webview.html, /const previewRows = \(step\.data \|\| \[\]\)\.map/);
+    assert.match(compiledPanelSource, /const canUseVisibleRows = previewColumns\.every/);
+    assert.match(compiledPanelSource, /const previewSourceRows = canUseVisibleRows/);
+    assert.match(compiledPanelSource, /\? \(step\.data \|\| \[\]\)/);
+    assert.match(compiledPanelSource, /: \(\(meta\.previewRows \|\| \[\]\)\.length > 0 \? meta\.previewRows : \(step\.data \|\| \[\]\)\)/);
+    assert.match(compiledPanelSource, /Preview follows the \\\$\{formatNumber\(step\.data\.length\)\} visible row\(s\) shown above\./);
+    assert.match(compiledPanelSource, /Preview includes supporting partition\/order columns that are not visible in the intermediate result\./);
     assert.match(compiledPanelSource, /Click a highlighted window-function column name to see how it was computed\./);
   });
 
@@ -448,6 +452,8 @@ module.exports = function runWebviewPanelTests(runTest, assert) {
     assert.match(panel.webview.html, /autoScrollGroupBreakdown\(step\)/);
     assert.ok(compiledPanelSource.includes('bdAggSrcHead" data-column-name="\\${escapeAttr(c)}"'));
     assert.ok(compiledPanelSource.includes('<th data-column-name="\\${escapeAttr(c)}">\\${escapeHtml(c)}</th>'));
+    assert.ok(compiledPanelSource.includes('resolveColumnReference(preCols, a.srcCol)'));
+    assert.ok(compiledPanelSource.includes("aggFns.map(fn => \\`<span class=\"aggBadge\">\\${escapeHtml(fn)}</span>\\`).join('')"));
     assert.match(panel.webview.html, /step\.name === 'GROUP BY' \? \[/);
     assert.match(panel.webview.html, /step\.aggColumns \|\| \[\]\)\.map\(\(agg\) => agg\.col\)/);
   });
