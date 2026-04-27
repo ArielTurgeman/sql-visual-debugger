@@ -503,6 +503,8 @@ module.exports = function runWebviewPanelTests(runTest, assert) {
     assert.ok(compiledPanelSource.includes('bdAggSrcHead" data-column-name="\\${escapeAttr(c)}"'));
     assert.ok(compiledPanelSource.includes('<th data-column-name="\\${escapeAttr(c)}">\\${escapeHtml(c)}</th>'));
     assert.ok(compiledPanelSource.includes('resolveColumnReference(preCols, a.srcCol)'));
+    assert.ok(compiledPanelSource.includes('const groupSourceColumns = step.groupBySourceColumns || groupOutputColumns;'));
+    assert.ok(compiledPanelSource.includes('resolveColumnReference(preCols, sourceRef)'));
     assert.ok(compiledPanelSource.includes("aggFns.map(fn => \\`<span class=\"aggBadge\">\\${escapeHtml(fn)}</span>\\`).join('')"));
     assert.match(panel.webview.html, /step\.name === 'GROUP BY' \? \[/);
     assert.match(panel.webview.html, /step\.aggColumns \|\| \[\]\)\.map\(\(agg\) => agg\.col\)/);

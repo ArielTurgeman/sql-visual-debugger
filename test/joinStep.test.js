@@ -417,6 +417,59 @@ module.exports = function runJoinStepTests(runTest, assert) {
     assert.equal(joinStep.rowsAfter, 2);
   });
 
+  runTest('chained JOIN steps use the qualified duplicate left key when later joins reference it', async () => {
+    const runner = new FakeRunner([
+      {
+        ...sqlIncludes('select `c`.* from qa_customers c'),
+        rows: [
+          { id: 1, code: 'C001', region_id: 1, status: 'active' },
+          { id: 3, code: 'C003', region_id: 2, status: 'inactive' },
+        ],
+      },
+      {
+        ...sqlIncludes('select `o`.* from qa_orders o'),
+        rows: [
+          { id: 10, customer_id: 1, status: 'open' },
+          { id: 13, customer_id: 3, status: 'open' },
+        ],
+      },
+      {
+        ...sqlIncludes('select `p`.* from qa_payments p'),
+        rows: [
+          { id: 100, order_id: 10, status: 'paid', amount: 100 },
+          { id: 103, order_id: 13, status: 'paid', amount: 0 },
+        ],
+      },
+      {
+        ...sqlIncludes('select c.id, o.id as order_id, p.id as payment_id from qa_customers c inner join qa_orders o on c.id = o.customer_id inner join qa_payments p on o.id = p.order_id'),
+        rows: [
+          { id: 1, order_id: 10, payment_id: 100 },
+          { id: 3, order_id: 13, payment_id: 103 },
+        ],
+      },
+    ]);
+
+    const steps = await executeDebugSteps(
+      'SELECT c.id, o.id AS order_id, p.id AS payment_id FROM qa_customers c INNER JOIN qa_orders o ON c.id = o.customer_id INNER JOIN qa_payments p ON o.id = p.order_id',
+      runner,
+    );
+
+    const joinSteps = steps.filter(step => step.name === 'JOIN');
+    if (joinSteps.length !== 2) {
+      throw new Error(`Expected 2 JOIN steps but found ${joinSteps.length}.`);
+    }
+
+    assert.equal(joinSteps[1].rowsBefore, 2);
+    assert.equal(joinSteps[1].rowsAfter, 2);
+    assert.equal(joinSteps[1].joinMeta.leftKey, 'o.id');
+    assert.equal(joinSteps[1].joinMeta.leftKeyCol, 'o.id');
+    assert.equal(joinSteps[1].joinMeta.rightKeyCol, 'order_id');
+    assert.deepEqual(joinSteps[1].data, [
+      { id: 1, code: 'C001', region_id: 1, status: 'active', 'o.id': 10, customer_id: 1, 'o.status': 'open', 'p.id': 100, order_id: 10, 'p.status': 'paid', amount: 100 },
+      { id: 3, code: 'C003', region_id: 2, status: 'inactive', 'o.id': 13, customer_id: 3, 'o.status': 'open', 'p.id': 103, order_id: 13, 'p.status': 'paid', amount: 0 },
+    ]);
+  });
+
   runTest('unsupported non-equality JOIN conditions are rejected clearly', async () => {
     const runner = new FakeRunner([]);
 

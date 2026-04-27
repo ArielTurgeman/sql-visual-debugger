@@ -159,26 +159,54 @@ export function detectOrderByColumns(orderByClause: string, columns: string[], s
 export function detectGroupByColumns(groupByClause: string, columns: string[], selectClause?: string): string[] {
   const body = groupByClause.replace(/^GROUP\s+BY\s+/i, '');
   const terms = splitTopLevelSelectItems(body).map(term => term.trim());
-  const matched = new Set(resolveClauseReferences(terms, columns));
+  const matched: string[] = [];
+  const seen = new Set<string>();
+  const selectMappings = selectClause ? buildSelectMappings(selectClause, columns) : [];
 
-  if (!selectClause) {
-    return Array.from(matched);
-  }
+  const pushMatched = (column: string | undefined) => {
+    if (!column) {
+      return;
+    }
+    const key = column.toLowerCase();
+    if (seen.has(key)) {
+      return;
+    }
+    seen.add(key);
+    matched.push(column);
+  };
 
-  const selectItems = splitTopLevelSelectItems(selectClause.replace(/^SELECT\s+/i, ''));
-  for (const item of selectItems) {
-    const aliasMatch = item.match(/^(.*?)(?:\s+AS\s+`?([A-Za-z_][A-Za-z0-9_]*)`?)$/i);
-    const expr = (aliasMatch ? aliasMatch[1] : item).trim();
-    const alias = aliasMatch?.[2];
-    const outputColumn = resolveOutputColumnReference(alias, expr, columns);
-    if (!outputColumn) continue;
+  for (const term of terms) {
+    const directMatches = resolveClauseReferences([term], columns);
+    if (directMatches.length > 0) {
+      directMatches.forEach(pushMatched);
+      continue;
+    }
 
-    if (terms.some(term => referencesSameSqlExpression(term, expr))) {
-      matched.add(outputColumn);
+    if (!selectClause) {
+      continue;
+    }
+
+    const selectMapping = selectMappings.find(mapping =>
+      Boolean(mapping.outputColumn) && referencesSameSqlExpression(term, mapping.expr),
+    );
+    if (selectMapping?.outputColumn) {
+      pushMatched(selectMapping.outputColumn);
     }
   }
 
-  return Array.from(matched);
+  return matched;
+}
+
+function buildSelectMappings(selectClause: string, columns: string[]): Array<{ expr: string; outputColumn?: string }> {
+  const selectItems = splitTopLevelSelectItems(selectClause.replace(/^SELECT\s+/i, ''));
+  return selectItems.map((item) => {
+    const aliasMatch = item.match(/^([\s\S]*?)(?:\s+AS\s+`?([A-Za-z_][A-Za-z0-9_]*)`?)$/i);
+    const expr = (aliasMatch ? aliasMatch[1] : item).trim();
+    const alias = aliasMatch?.[2];
+    const outputColumn = resolveOutputColumnReference(alias, expr, columns)
+      ?? (alias ? columns.find(col => bareIdentifier(col).toLowerCase() === alias.toLowerCase()) : undefined);
+    return { expr, outputColumn };
+  });
 }
 
 export function detectAggColumns(
@@ -289,10 +317,18 @@ export async function detectCaseColumns(
     rowExplanations: helperRows.map(row => ({
       matchedRule: String(row[`__sql_debug_case_${caseIndex}_branch`] ?? 'No matching branch'),
       returnedValue: row[meta.outputColumn],
-      inputValues: meta.inputRefs.map((ref, inputIndex) => ({
-        column: ref.label,
-        value: row[`__sql_debug_case_${caseIndex}_input_${inputIndex}`],
-      })),
+      inputValues: (() => {
+        const matchedRule = String(row[`__sql_debug_case_${caseIndex}_branch`] ?? 'No matching branch');
+        const matchedBranch = meta.branches.find(branch => branch.label === matchedRule);
+        const relevantRefs = matchedBranch?.inputRefs ?? meta.inputRefs;
+        return relevantRefs.map((ref) => {
+          const inputIndex = meta.inputRefs.findIndex(candidate => candidate.expr === ref.expr);
+          return {
+            column: ref.label,
+            value: inputIndex >= 0 ? row[`__sql_debug_case_${caseIndex}_input_${inputIndex}`] : undefined,
+          };
+        });
+      })(),
     })),
   }));
 }
@@ -449,8 +485,9 @@ function buildCaseDebugQuery(
   currentFromSql: string,
   usesDistinct: boolean,
 ): string {
+  const groupedQuery = Boolean(parsed.groupByClause || parsed.havingClause);
   if (useCanonicalTail) {
-    const helperColumns = cases.flatMap((meta, caseIndex) => buildCaseHelperSelectParts(meta, caseIndex)).join(', ');
+    const helperColumns = cases.flatMap((meta, caseIndex) => buildCaseHelperSelectParts(meta, caseIndex, groupedQuery)).join(', ');
     const selectList = canonicalSchema
       .map(col => (col.sqlAlias ? `${col.sqlExpr} AS ${col.sqlAlias}` : col.sqlExpr))
       .concat(helperColumns ? [helperColumns] : [])
@@ -460,18 +497,19 @@ function buildCaseDebugQuery(
   }
 
   const selectBody = selectClause.replace(/^SELECT\s+/i, '').trim();
-  const helperColumns = cases.flatMap((meta, caseIndex) => buildCaseHelperSelectParts(meta, caseIndex));
+  const helperColumns = cases.flatMap((meta, caseIndex) => buildCaseHelperSelectParts(meta, caseIndex, groupedQuery));
   const helperSelectClause = `SELECT ${[selectBody, ...helperColumns].join(', ')}`;
   return buildFinalQuery({ ...parsed, selectClause: helperSelectClause }, { upTo: 'SELECT' });
 }
 
-function buildCaseHelperSelectParts(meta: ParsedCaseExpression, caseIndex: number): string[] {
+function buildCaseHelperSelectParts(meta: ParsedCaseExpression, caseIndex: number, groupedQuery: boolean): string[] {
   const branchClauses = meta.branches.map(branch =>
     `WHEN ${branch.condition} THEN ${quoteSqlString(branch.label)}`,
   );
-  const branchExpr = `CASE ${branchClauses.join(' ')} ELSE ${quoteSqlString(meta.elseLabel)} END AS \`__sql_debug_case_${caseIndex}_branch\``;
+  const branchCaseExpr = `CASE ${branchClauses.join(' ')} ELSE ${quoteSqlString(meta.elseLabel)} END`;
+  const branchExpr = `${groupedQuery ? `ANY_VALUE(${branchCaseExpr})` : branchCaseExpr} AS \`__sql_debug_case_${caseIndex}_branch\``;
   const inputExprs = meta.inputRefs.map((ref, inputIndex) =>
-    `${ref.expr} AS \`__sql_debug_case_${caseIndex}_input_${inputIndex}\``,
+    `${groupedQuery ? `ANY_VALUE(${ref.expr})` : ref.expr} AS \`__sql_debug_case_${caseIndex}_input_${inputIndex}\``,
   );
   return [branchExpr, ...inputExprs];
 }
@@ -484,12 +522,17 @@ function buildWindowPreviewQuery(
     if (column === meta.outputColumn) {
       return `${meta.expression}`;
     }
-    return column;
+    const expression = resolveWindowPreviewExpression(meta, column);
+    return normalizeQualified(expression).toLowerCase() === normalizeQualified(column).toLowerCase()
+      ? expression
+      : `${expression} AS \`${column.replace(/`/g, '``')}\``;
   });
 
   const orderTerms = [
-    ...meta.partitionBy,
-    ...(meta.orderByTerms ?? []).map(term => `${term.column} ${term.direction}`),
+    ...((meta.partitionByExpressions && meta.partitionByExpressions.length > 0) ? meta.partitionByExpressions : meta.partitionBy),
+    ...((meta.orderBySourceTerms && meta.orderBySourceTerms.length > 0)
+      ? meta.orderBySourceTerms.map(term => `${term.expression} ${term.direction}`)
+      : (meta.orderByTerms ?? []).map(term => `${term.column} ${term.direction}`)),
   ];
 
   const baseSql = buildFinalQuery(
@@ -503,6 +546,27 @@ function buildWindowPreviewQuery(
   );
 
   return `${baseSql}${orderTerms.length > 0 ? ` ORDER BY ${orderTerms.join(', ')}` : ''}`;
+}
+
+function resolveWindowPreviewExpression(
+  meta: Omit<WindowColumnMeta, 'explanation' | 'howComputed' | 'previewColumns' | 'previewRows'>,
+  column: string,
+): string {
+  if (meta.sourceColumn && meta.sourceColumn.toLowerCase() === column.toLowerCase()) {
+    return meta.sourceExpression ?? column;
+  }
+
+  const partitionIndex = meta.partitionBy.findIndex(part => part.toLowerCase() === column.toLowerCase());
+  if (partitionIndex !== -1) {
+    return meta.partitionByExpressions?.[partitionIndex] ?? column;
+  }
+
+  const orderIndex = meta.orderByTerms.findIndex(term => term.column.toLowerCase() === column.toLowerCase());
+  if (orderIndex !== -1) {
+    return meta.orderBySourceTerms?.[orderIndex]?.expression ?? column;
+  }
+
+  return column;
 }
 
 function resolveClauseReferences(references: string[], columns: string[], schema?: ColumnDef[]): string[] {

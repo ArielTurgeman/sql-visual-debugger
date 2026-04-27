@@ -180,4 +180,161 @@ module.exports = function runGroupByStepTests(runTest, assert) {
     ]);
     assert.deepEqual(groupStep.preGroupColumns, ['Code', 'Continent', 'Population', 'Id', 'ci.Population', 'CountryCode']);
   });
+
+  runTest('GROUP BY keeps qualified source keys for breakdown when grouped output has a duplicate bare name', async () => {
+    const runner = new FakeRunner([
+      {
+        ...sqlIncludes('select `c`.* from qa_customers c'),
+        rows: [
+          { id: 1, status: 'active' },
+          { id: 2, status: 'active' },
+        ],
+      },
+      {
+        ...sqlIncludes('select `o`.* from qa_orders o'),
+        rows: [
+          { id: 10, customer_id: 1, status: 'open', amount: 100 },
+          { id: 11, customer_id: 1, status: 'open', amount: 100 },
+          { id: 12, customer_id: 2, status: 'closed', amount: 50 },
+        ],
+      },
+      {
+        ...sqlIncludes('group by o.status'),
+        rows: [
+          { status: 'open', order_count: 2, total_amount: 200 },
+          { status: 'closed', order_count: 1, total_amount: 50 },
+        ],
+      },
+      {
+        ...sqlIncludes('select o.status, count(*) as order_count, sum(o.amount) as total_amount'),
+        rows: [
+          { status: 'open', order_count: 2, total_amount: 200 },
+          { status: 'closed', order_count: 1, total_amount: 50 },
+        ],
+      },
+    ]);
+
+    const steps = await executeDebugSteps(
+      'SELECT o.status, COUNT(*) AS order_count, SUM(o.amount) AS total_amount FROM qa_customers c INNER JOIN qa_orders o ON c.id = o.customer_id GROUP BY o.status ORDER BY order_count DESC, o.status',
+      runner,
+    );
+
+    const groupStep = steps.find(step => step.name === 'GROUP BY');
+    if (!groupStep) {
+      throw new Error('Expected a GROUP BY step but none was produced.');
+    }
+
+    assert.deepEqual(groupStep.columns, ['status', 'order_count', 'total_amount']);
+    assert.deepEqual(groupStep.groupByColumns, ['status']);
+    assert.deepEqual(groupStep.groupBySourceColumns, ['o.status']);
+    assert.deepEqual(groupStep.preGroupColumns, ['id', 'status', 'o.id', 'customer_id', 'o.status', 'amount']);
+  });
+
+  runTest('GROUP BY preserves output key order when mixing aliases and qualified subquery columns', async () => {
+    const runner = new FakeRunner([
+      {
+        ...sqlIncludes('select `sub`.*, `c`.* from (select o.customer_id, o.status as order_status, o.amount from qa_orders o where o.amount is not null) sub inner join qa_customers c on sub.customer_id = c.id'),
+        rows: [
+          { customer_id: 1, order_status: 'open', amount: 100, id: 1, status: 'active' },
+          { customer_id: 1, order_status: 'open', amount: 100, id: 1, status: 'active' },
+          { customer_id: 2, order_status: 'closed', amount: null, id: 2, status: 'active' },
+          { customer_id: 3, order_status: 'open', amount: 0, id: 3, status: 'inactive' },
+        ],
+      },
+      {
+        ...sqlIncludes('select c.status as customer_status, sub.order_status, count(*) as row_count, sum(sub.amount) as total_amount from (select o.customer_id, o.status as order_status, o.amount from qa_orders o where o.amount is not null) sub inner join qa_customers c on sub.customer_id = c.id group by c.status, sub.order_status'),
+        rows: [
+          { customer_status: 'active', order_status: 'open', row_count: 4, total_amount: 325 },
+          { customer_status: 'inactive', order_status: 'open', row_count: 1, total_amount: 0 },
+          { customer_status: 'active', order_status: 'closed', row_count: 1, total_amount: 100 },
+        ],
+      },
+      {
+        ...sqlIncludes('select `c`.* from qa_customers c'),
+        rows: [
+          { id: 1, status: 'active' },
+          { id: 2, status: 'active' },
+          { id: 3, status: 'inactive' },
+          { id: 4, status: 'active' },
+          { id: 5, status: 'active' },
+          { id: 6, status: 'active' },
+        ],
+      },
+      {
+        ...sqlIncludes('select `sub`.* from (select o.customer_id, o.status as order_status, o.amount from qa_orders o where o.amount is not null) sub'),
+        rows: [
+          { customer_id: 1, order_status: 'open', amount: 100 },
+          { customer_id: 1, order_status: 'open', amount: 100 },
+          { customer_id: 3, order_status: 'open', amount: 0 },
+          { customer_id: 4, order_status: 'open', amount: 50 },
+          { customer_id: 5, order_status: 'open', amount: 75 },
+          { customer_id: 6, order_status: 'closed', amount: 100 },
+        ],
+      },
+      {
+        ...sqlIncludes('select `o`.* from qa_orders o'),
+        rows: [
+          { customer_id: 1, status: 'open', amount: 100 },
+          { customer_id: 1, status: 'open', amount: 100 },
+          { customer_id: 3, status: 'open', amount: 0 },
+          { customer_id: 4, status: 'open', amount: 50 },
+          { customer_id: 5, status: 'open', amount: 75 },
+          { customer_id: 6, status: 'closed', amount: 100 },
+        ],
+      },
+      {
+        ...sqlIncludes('select `o`.`customer_id`, `o`.`status`, `o`.`amount` from qa_orders o where o.amount is not null'),
+        rows: [
+          { customer_id: 1, status: 'open', amount: 100 },
+          { customer_id: 1, status: 'open', amount: 100 },
+          { customer_id: 3, status: 'open', amount: 0 },
+          { customer_id: 4, status: 'open', amount: 50 },
+          { customer_id: 5, status: 'open', amount: 75 },
+          { customer_id: 6, status: 'closed', amount: 100 },
+        ],
+      },
+      {
+        ...sqlIncludes('select o.customer_id, o.status as order_status, o.amount from qa_orders o where o.amount is not null'),
+        rows: [
+          { customer_id: 1, order_status: 'open', amount: 100 },
+          { customer_id: 1, order_status: 'open', amount: 100 },
+          { customer_id: 3, order_status: 'open', amount: 0 },
+          { customer_id: 4, order_status: 'open', amount: 50 },
+          { customer_id: 5, order_status: 'open', amount: 75 },
+          { customer_id: 6, order_status: 'closed', amount: 100 },
+        ],
+      },
+    ]);
+
+    const steps = await executeDebugSteps(
+      `
+      SELECT
+        c.status AS customer_status,
+        sub.order_status,
+        COUNT(*) AS row_count,
+        SUM(sub.amount) AS total_amount
+      FROM (
+        SELECT
+          o.customer_id,
+          o.status AS order_status,
+          o.amount
+        FROM qa_orders o
+        WHERE o.amount IS NOT NULL
+      ) sub
+      INNER JOIN qa_customers c ON sub.customer_id = c.id
+      GROUP BY c.status, sub.order_status
+      HAVING COUNT(*) >= 1
+      ORDER BY customer_status, total_amount DESC
+      `,
+      runner,
+    );
+
+    const groupStep = steps.find(step => step.name === 'GROUP BY');
+    if (!groupStep) {
+      throw new Error('Expected a GROUP BY step but none was produced.');
+    }
+
+    assert.deepEqual(groupStep.groupByColumns, ['customer_status', 'order_status']);
+    assert.deepEqual(groupStep.groupBySourceColumns, ['c.status', 'sub.order_status']);
+  });
 };

@@ -117,6 +117,7 @@ export function buildGroupByStep(input: {
   groupKeys: string;
   sqlFragment: string;
   groupByColumns: string[];
+  groupBySourceColumns?: string[];
   aggColumns: Array<{ col: string; fn: string; srcCol?: string }>;
   aggSummary?: string;
   preGroupRows: Record<string, unknown>[];
@@ -133,6 +134,7 @@ export function buildGroupByStep(input: {
     data: input.rows.slice(0, MAX_DISPLAY_ROWS),
     columns: input.groupedCols,
     groupByColumns: input.groupByColumns,
+    groupBySourceColumns: input.groupBySourceColumns,
     aggColumns: input.aggColumns,
     aggSummary: input.aggSummary,
     preGroupRows: input.preGroupRows,

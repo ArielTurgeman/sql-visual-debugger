@@ -560,9 +560,17 @@ function renderApp(input: { sql: string; source: string; connectionLabel: string
         const preRows   = step.preGroupRows   || [];
         const preCols   = step.preGroupColumns || (preRows.length > 0 ? Object.keys(preRows[0]) : []);
         const breakdownLimit = 200;
-        const groupMappings = (step.groupByColumns || []).map((groupCol) => {
-          const sourceColumn = resolveColumnReference(preCols, groupCol);
-          const outputColumn = resolveColumnReference(step.columns || [], groupCol) || groupCol;
+        const groupOutputColumns = step.groupByColumns || [];
+        const groupSourceColumns = step.groupBySourceColumns || groupOutputColumns;
+        const groupMappings = groupSourceColumns.map((sourceRef, index) => {
+          const outputRef = groupOutputColumns[index] || sourceRef;
+          const sourceColumn =
+            resolveColumnReference(preCols, sourceRef) ||
+            resolveColumnReference(preCols, outputRef);
+          const outputColumn =
+            resolveColumnReference(step.columns || [], outputRef) ||
+            resolveColumnReference(step.columns || [], sourceRef) ||
+            outputRef;
           return { sourceColumn, outputColumn };
         }).filter((mapping) => mapping.sourceColumn && mapping.outputColumn);
 

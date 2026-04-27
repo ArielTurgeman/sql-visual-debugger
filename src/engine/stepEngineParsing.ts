@@ -381,9 +381,12 @@ export function parseWindowExpression(
   expression: string;
   functionName: string;
   sourceColumn?: string;
+  sourceExpression?: string;
   partitionBy: string[];
+  partitionByExpressions: string[];
   orderBy: string[];
   orderByTerms: Array<{ column: string; direction: 'ASC' | 'DESC' }>;
+  orderBySourceTerms: Array<{ expression: string; direction: 'ASC' | 'DESC' }>;
 } | null {
   const aliasMatch = item.match(/^(.*?)(?:\s+AS\s+`?([A-Za-z_][A-Za-z0-9_]*)`?)$/i);
   const expr = aliasMatch ? aliasMatch[1].trim() : item.trim();
@@ -400,26 +403,33 @@ export function parseWindowExpression(
     throw new Error(`Window frame clauses are not supported yet: ${item}`);
   }
 
-  const { partitionBy, orderBy, orderByTerms } = parseWindowOverClause(overClause);
+  const { partitionBy, partitionByExpressions, orderBy, orderByTerms, orderBySourceTerms } = parseWindowOverClause(overClause);
   return {
     outputColumn: resolveOutputColumn(alias, expr, resultColumns),
     expression: item.trim(),
     functionName,
     sourceColumn: sourceArg && sourceArg !== '*' ? bareIdentifier(sourceArg) : undefined,
+    sourceExpression: sourceArg && sourceArg !== '*' ? sourceArg : undefined,
     partitionBy,
+    partitionByExpressions,
     orderBy,
     orderByTerms,
+    orderBySourceTerms,
   };
 }
 
 export function parseWindowOverClause(overClause: string): {
   partitionBy: string[];
+  partitionByExpressions: string[];
   orderBy: string[];
   orderByTerms: Array<{ column: string; direction: 'ASC' | 'DESC' }>;
+  orderBySourceTerms: Array<{ expression: string; direction: 'ASC' | 'DESC' }>;
 } {
   let partitionBy: string[] = [];
+  let partitionByExpressions: string[] = [];
   let orderBy: string[] = [];
   let orderByTerms: Array<{ column: string; direction: 'ASC' | 'DESC' }> = [];
+  let orderBySourceTerms: Array<{ expression: string; direction: 'ASC' | 'DESC' }> = [];
   const normalized = overClause.trim();
 
   const orderIndex = indexOfTopLevelKeyword(normalized, 'ORDER BY');
@@ -427,22 +437,26 @@ export function parseWindowOverClause(overClause: string): {
 
   if (partitionIndex !== -1) {
     const partBody = normalized.slice(partitionIndex + 'PARTITION BY'.length, orderIndex === -1 ? normalized.length : orderIndex).trim();
-    partitionBy = splitTopLevelSelectItems(partBody).map(bareIdentifier).filter(Boolean);
+    partitionByExpressions = splitTopLevelSelectItems(partBody).map(term => term.trim()).filter(Boolean);
+    partitionBy = partitionByExpressions.map(bareIdentifier).filter(Boolean);
   }
   if (orderIndex !== -1) {
     const orderBody = normalized.slice(orderIndex + 'ORDER BY'.length).trim();
-    orderByTerms = splitTopLevelSelectItems(orderBody)
+    const parsedOrderTerms = splitTopLevelSelectItems(orderBody)
       .map(term => {
         const directionMatch = term.match(/\s+(ASC|DESC)\s*$/i);
         const direction = (directionMatch?.[1]?.toUpperCase() as 'ASC' | 'DESC' | undefined) ?? 'ASC';
-        const column = bareIdentifier(term.replace(/\s+(ASC|DESC)\s*$/i, ''));
-        return column ? { column, direction } : null;
+        const expression = term.replace(/\s+(ASC|DESC)\s*$/i, '').trim();
+        const column = bareIdentifier(expression);
+        return column ? { column, expression, direction } : null;
       })
-      .filter((term): term is { column: string; direction: 'ASC' | 'DESC' } => term !== null);
+      .filter((term): term is { column: string; expression: string; direction: 'ASC' | 'DESC' } => term !== null);
+    orderByTerms = parsedOrderTerms.map(term => ({ column: term.column, direction: term.direction }));
+    orderBySourceTerms = parsedOrderTerms.map(term => ({ expression: term.expression, direction: term.direction }));
     orderBy = orderByTerms.map(term => `${term.column} ${term.direction}`);
   }
 
-  return { partitionBy, orderBy, orderByTerms };
+  return { partitionBy, partitionByExpressions, orderBy, orderByTerms, orderBySourceTerms };
 }
 
 export function parseCaseExpression(
@@ -463,7 +477,7 @@ export function parseCaseExpression(
   }
 
   let cursor = 0;
-  const branches: Array<{ condition: string; label: string }> = [];
+  const branches: Array<{ condition: string; label: string; inputRefs: Array<{ expr: string; label: string }> }> = [];
   let elseLabel = 'ELSE';
 
   while (cursor < innerBody.length) {
@@ -476,7 +490,11 @@ export function parseCaseExpression(
       const resultStart = skipSqlWhitespace(innerBody, thenIndex + 4);
       const nextIndex = findNextTopLevelKeyword(innerBody, resultStart, ['WHEN', 'ELSE']);
       const resultExpr = innerBody.slice(resultStart, nextIndex === -1 ? innerBody.length : nextIndex).trim();
-      branches.push({ condition, label: `WHEN ${condition} THEN ${resultExpr}` });
+      branches.push({
+        condition,
+        label: `WHEN ${condition} THEN ${resultExpr}`,
+        inputRefs: extractCaseInputRefs([condition], availableInputColumns),
+      });
       cursor = nextIndex === -1 ? innerBody.length : nextIndex;
       continue;
     }
@@ -606,7 +624,7 @@ function extractCaseInputRefs(
       if (!token.includes('.') && !availableBare.has(bare.toLowerCase())) continue;
       if (seen.has(key)) continue;
       seen.add(key);
-      refs.push({ expr: raw, label: bare });
+      refs.push({ expr: raw, label: token.includes('.') ? normalizeQualified(raw) : bare });
     }
   }
 

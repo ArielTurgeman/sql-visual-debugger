@@ -22,6 +22,7 @@ import {
   isSelectDistinct,
   parseSelectQuery,
   removeDistinctFromSelectClause,
+  splitTopLevelSelectItems,
   stripTicks,
 } from './stepEngineParsing';
 import {
@@ -114,8 +115,8 @@ async function executeSingleQueryBlockSteps(
 
     const rightRows = await runAliasedSelect(runBlockSelect, `FROM ${join.tableName} ${join.tableAlias}`.trim());
     const leftExprTableRaw = join.leftExpr.includes('.') ? join.leftExpr.split('.')[0] : '';
-    const leftExprCol = join.leftExpr.includes('.') ? join.leftExpr.split('.').pop()! : join.leftExpr;
-    const rightExprCol = join.rightExpr.includes('.') ? join.rightExpr.split('.').pop()! : join.rightExpr;
+    const leftExprCol = resolveJoinDisplayKey(currentRows, join.leftExpr);
+    const rightExprCol = resolveJoinDisplayKey(rightRows, join.rightExpr);
     const leftExprBelongsToRight =
       leftExprTableRaw.toLowerCase() === join.tableAlias.toLowerCase() ||
       leftExprTableRaw.toLowerCase() === join.tableName.toLowerCase();
@@ -235,6 +236,7 @@ async function executeSingleQueryBlockSteps(
       groupKeys: parsed.groupByClause.replace(/^GROUP\s+BY\s+/i, '').trim(),
       sqlFragment: parsed.groupByClause,
       groupByColumns: detectGroupByColumns(parsed.groupByClause, groupedCols, parsed.selectClause),
+      groupBySourceColumns: splitTopLevelSelectItems(parsed.groupByClause.replace(/^GROUP\s+BY\s+/i, '').trim()),
       aggColumns: detectAggColumns(parsed.selectClause, groupedCols),
       aggSummary: buildAggSummary(parsed.selectClause) || undefined,
       preGroupRows: currentRows,
@@ -372,6 +374,16 @@ function getColumns(rows: Record<string, unknown>[]): string[] {
   return rows.length > 0 ? Object.keys(rows[0]) : [];
 }
 
+function resolveJoinDisplayKey(rows: Record<string, unknown>[], expr: string): string {
+  const columns = getColumns(rows);
+  const exact = stripTicks(expr);
+  if (columns.includes(exact)) {
+    return exact;
+  }
+
+  return expr.includes('.') ? stripTicks(expr.split('.').pop() || expr) : stripTicks(expr);
+}
+
 function buildBlockResolutionContext(blocks: QueryBlock[]): BlockResolutionContext {
   const byReferenceName = new Map<string, QueryBlock>();
   for (const block of blocks) {
@@ -449,10 +461,11 @@ function inlineSubqueryDependencies(
 
 function replaceSourceReference(sql: string, sourceName: string, replacement: string): string {
   const escapedSourceName = escapeRegex(stripTicks(sourceName));
+  const anyReferencePattern = new RegExp(`(?:\`?${escapedSourceName}\`?)`, 'i');
   const sourcePattern = new RegExp(`\\b(FROM|JOIN)\\s+(?:\`${escapedSourceName}\`|${escapedSourceName})(?=\\s|$)`, 'gi');
   const nextSql = sql.replace(sourcePattern, (_match, clauseKeyword: string) => `${clauseKeyword} ${replacement}`);
 
-  if (nextSql === sql) {
+  if (nextSql === sql && anyReferencePattern.test(sql)) {
     throw new Error(
       `Unsupported read-only query shape: expected to inline subquery source \`${sourceName}\`, but it was referenced in an unsupported way.`,
     );

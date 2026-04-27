@@ -338,4 +338,67 @@ module.exports = function runWindowStepTests(runTest, assert) {
       { team_id: 20, score: 76, row_num: 12 },
     );
   });
+
+  runTest('window preview queries keep qualified source expressions after joins', async () => {
+    const runner = new FakeRunner([
+      {
+        ...sqlIncludes('select `c`.* from qa_customers c'),
+        rows: [
+          { id: 1, name: 'Ada' },
+          { id: 2, name: 'Ben' },
+        ],
+      },
+      {
+        ...sqlIncludes('select `o`.* from qa_orders o'),
+        rows: [
+          { id: 10, customer_id: 1, status: 'open', amount: 100, created_at: '2024-01-01' },
+          { id: 11, customer_id: 1, status: 'open', amount: 50, created_at: '2024-01-02' },
+          { id: 12, customer_id: 2, status: 'closed', amount: 25, created_at: '2024-01-03' },
+        ],
+      },
+      {
+        ...sqlIncludes('select c.id as `id`, o.created_at as `created_at`, o.amount as `amount`, sum(o.amount) over (partition by c.id order by o.created_at) as running_customer_amount'),
+        rows: [
+          { id: 1, created_at: '2024-01-01', amount: 100, running_customer_amount: 100 },
+          { id: 1, created_at: '2024-01-02', amount: 50, running_customer_amount: 150 },
+          { id: 2, created_at: '2024-01-03', amount: 25, running_customer_amount: 25 },
+        ],
+      },
+      {
+        ...sqlIncludes('sum(o.amount) over (partition by c.id order by o.created_at) as running_customer_amount'),
+        rows: [
+          { name: 'Ada', status: 'open', amount: 100, running_customer_amount: 100 },
+          { name: 'Ada', status: 'open', amount: 50, running_customer_amount: 150 },
+          { name: 'Ben', status: 'closed', amount: 25, running_customer_amount: 25 },
+        ],
+      },
+    ]);
+
+    const steps = await executeDebugSteps(
+      `
+      SELECT
+        c.name,
+        o.status,
+        o.amount,
+        SUM(o.amount) OVER (PARTITION BY c.id ORDER BY o.created_at) AS running_customer_amount
+      FROM qa_customers c
+      INNER JOIN qa_orders o ON c.id = o.customer_id
+      ORDER BY c.id, o.created_at
+      `,
+      runner,
+    );
+
+    const selectStep = steps.find(step => step.name === 'SELECT');
+    if (!selectStep) throw new Error('Expected a SELECT step but none was produced.');
+
+    const windowMeta = selectStep.windowColumns[0];
+    assert.deepEqual(windowMeta.partitionBy, ['id']);
+    assert.deepEqual(windowMeta.partitionByExpressions, ['c.id']);
+    assert.equal(windowMeta.sourceColumn, 'amount');
+    assert.equal(windowMeta.sourceExpression, 'o.amount');
+    assert.deepEqual(windowMeta.orderByTerms, [{ column: 'created_at', direction: 'ASC' }]);
+    assert.deepEqual(windowMeta.orderBySourceTerms, [{ expression: 'o.created_at', direction: 'ASC' }]);
+    assert.ok(runner.queries.some(sql => normalizeSql(sql).includes('select c.id as `id`, o.created_at as `created_at`, o.amount as `amount`')));
+    assert.ok(runner.queries.every(sql => !normalizeSql(sql).includes('select id, created_at, amount,')));
+  });
 };

@@ -19,6 +19,7 @@ export type DebugStep = {
   whereScalarSubquery?: WhereScalarSubqueryMeta;
   sortColumns?: string[];
   groupByColumns?: string[];
+  groupBySourceColumns?: string[];
   aggColumns?: Array<{ col: string; fn: string; srcCol?: string }>;
   aggSummary?: string;
   preGroupRows?: Record<string, unknown>[];
@@ -56,9 +57,12 @@ export type WindowColumnMeta = {
   expression: string;
   functionName: string;
   sourceColumn?: string;
+  sourceExpression?: string;
   partitionBy: string[];
+  partitionByExpressions?: string[];
   orderBy: string[];
   orderByTerms: Array<{ column: string; direction: 'ASC' | 'DESC' }>;
+  orderBySourceTerms?: Array<{ expression: string; direction: 'ASC' | 'DESC' }>;
   explanation: string;
   howComputed: string[];
   previewColumns: string[];
@@ -134,7 +138,7 @@ export type ParsedCaseExpression = {
   outputColumn: string;
   expression: string;
   inputRefs: Array<{ expr: string; label: string }>;
-  branches: Array<{ condition: string; label: string }>;
+  branches: Array<{ condition: string; label: string; inputRefs: Array<{ expr: string; label: string }> }>;
   elseLabel: string;
 };
 
